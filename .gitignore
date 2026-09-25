@@ -1,0 +1,13 @@
+.DS_Store
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+engine/checkpoints/
+engine/datasets/generated/
+engine/.cache/
+# Swift
+app/.build/
+app/.swiftpm/
+build/

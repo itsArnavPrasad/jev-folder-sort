@@ -1,0 +1,11 @@
+jev-folder-sort
+Copyright 2026 Arnav Prasad
+
+This product includes software from open-jev
+(https://github.com/kyegomez/open-jev, commit 93843ef288f3d35fd91263377c40b6f917d77da0),
+licensed under the Apache License 2.0. It is vendored, unmodified, in engine/third_party/open_jev/.
+
+The engine uses the tokenizer vocabulary and word embeddings of
+sentence-transformers/all-MiniLM-L6-v2 (Apache License 2.0).
+
+"Jev" is a model by TypeSafe AI. This project is not affiliated with TypeSafe AI.

@@ -1,0 +1,14 @@
+(version 1)
+; jev-folder-sort engine sandbox: the model runs with no network access and
+; may only write to its own model directory and temp space.
+(allow default)
+(deny network*)
+(allow network* (remote unix-socket))
+(deny file-write*)
+(allow file-write*
+    (subpath (param "MODEL_DIR"))
+    (subpath (param "TMP_DIR"))
+    (subpath "/private/var/folders")
+    (subpath "/private/tmp")
+    (literal "/dev/null")
+    (literal "/dev/dtracehelper"))
