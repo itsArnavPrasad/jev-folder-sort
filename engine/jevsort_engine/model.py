@@ -26,21 +26,23 @@ def default_config() -> JevConfig:
         vocab_size=VOCAB_SIZE,
         d_model=384,
         n_heads=6,
-        d_ff=1536,
+        d_ff=1024,
         dropout=0.1,
         n_state_layers=4,
         max_state_len=512,
         n_question_layers=2,
         max_question_len=48,
         n_slots=8,
-        n_readout_layers=6,
+        n_readout_layers=4,
     )
 
 
 def pick_device() -> torch.device:
     if os.environ.get("JEVSORT_DEVICE"):
         return torch.device(os.environ["JEVSORT_DEVICE"])
-    return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    # At this model size CPU beats MPS: kernel-launch overhead dominates the
+    # tiny matmuls, and CPU avoids a ~1 s Metal warm-up. JEVSORT_DEVICE=mps to override.
+    return torch.device("cpu")
 
 
 def _minilm_word_embeddings() -> torch.Tensor:
@@ -60,20 +62,26 @@ def build_model(cfg: JevConfig | None = None, pretrained_embeddings: bool = True
     enc = model.state_encoder
     for emb in (enc.depth_emb, enc.sibling_emb, enc.path_emb, enc.pos_emb, model.text_encoder.pos):
         torch.nn.init.normal_(emb.weight, std=0.02)
+    # One word-embedding table, shared by state and question/option encoders and
+    # frozen at MiniLM's pretrained values: 23M fewer trainable parameters, and
+    # words the synthetic corpus never uses (brands, German) keep their meaning.
+    model.text_encoder.token = enc.token
     if pretrained_embeddings:
-        words = _minilm_word_embeddings()
         with torch.no_grad():
-            enc.token.weight.copy_(words)
-            model.text_encoder.token.weight.copy_(words)
+            enc.token.weight.copy_(_minilm_word_embeddings())
     else:
-        for emb in (enc.token, model.text_encoder.token):
-            torch.nn.init.normal_(emb.weight, std=0.056)
+        torch.nn.init.normal_(enc.token.weight, std=0.056)
+    enc.token.weight.requires_grad_(False)
     return model
 
 
 def save_checkpoint(model: Jev, directory: Path, meta: dict) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    weights = {k: v.detach().to("cpu", torch.float16) for k, v in model.state_dict().items()}
+    weights = {
+        k: v.detach().to("cpu", torch.float16)
+        for k, v in model.state_dict().items()
+        if k != "text_encoder.token.weight"  # tied to state_encoder.token
+    }
     save_file(weights, str(directory / "model.safetensors"))
     (directory / "config.json").write_text(json.dumps(asdict(model.cfg), indent=2))
     (directory / "meta.json").write_text(json.dumps(meta, indent=2))
@@ -82,7 +90,9 @@ def save_checkpoint(model: Jev, directory: Path, meta: dict) -> None:
 def load_checkpoint(directory: Path, device: torch.device | None = None) -> tuple[Jev, dict]:
     cfg = JevConfig(**json.loads((directory / "config.json").read_text()))
     model = Jev(cfg, tokenizer=PretrainedTokenizer())
+    model.text_encoder.token = model.state_encoder.token
     weights = {k: v.float() for k, v in load_file(str(directory / "model.safetensors")).items()}
+    weights["text_encoder.token.weight"] = weights["state_encoder.token.weight"]
     model.load_state_dict(weights)
     meta = json.loads((directory / "meta.json").read_text())
     return model.to(device or pick_device()).eval(), meta
