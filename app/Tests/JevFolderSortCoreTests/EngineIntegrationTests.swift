@@ -30,4 +30,18 @@ struct EngineIntegrationTests {
         #expect(fx.exists("Outside/tax.txt"))         // never in scope
         await client.stop()
     }
+
+    /// A response far larger than one pipe read must be reassembled in order.
+    @Test func largeBatchesRoundTripIntact() async throws {
+        let client = EngineClient(launch: try .development(engineDirectory: engineDir, stub: true), timeout: .seconds(60))
+        let tree = (1...40).map { EngineFolder(id: "f\($0)", path: "Folder \($0)/Sub", description: "things about topic \($0)") }
+        let files = (0..<300).map { i in
+            EngineFile(id: "c\(i)", state: FileState(name: "topic \(i % 40 + 1) notes.txt", ext: "txt",
+                                                    text: String(repeating: "topic \(i % 40 + 1) ", count: 50)))
+        }
+        let results = try await client.classify(tree: tree, files: files)
+        #expect(results.map(\.file) == files.map(\.id))
+        #expect(results.allSatisfy { r in r.choice == EngineDecision.noneID || tree.contains { $0.id == r.choice } })
+        await client.stop()
+    }
 }

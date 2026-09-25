@@ -4,15 +4,17 @@
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | **Engine spike** | Vendored open-jev runs locally on MPS; pretrained tokenizer swapped in; `classify` works over the stdin/stdout protocol |
-| M1 | **Base model** | Synthetic dataset + training script; base checkpoint beats a filename-keyword baseline on the held-out eval; ECE measured |
-| M2 | **App skeleton** | Menu-bar app, settings persisted in SQLite, engine child process start/stop/health |
-| M3 | **Core pipeline** | Interval scanner with snapshot diff, extractor (metadata + first N KB), rules, mover with collision handling, history log |
+| M0 | ✅ **Engine spike** | Vendored open-jev runs locally (CPU, MPS optional); pretrained tokenizer swapped in; `classify` works over the stdin/stdout protocol |
+| M1 | ✅ **Base model** | Synthetic dataset + training script; base checkpoint beats a filename-keyword baseline on the held-out eval; ECE measured |
+| M2 | ✅ **App skeleton** | Menu-bar app, settings persisted in SQLite, engine child process start/stop/health |
+| M3 | ✅ **Core pipeline** | Interval scanner with snapshot diff, extractor (metadata + first N KB), rules, mover with collision handling, history log |
 | M4 | **Structure editor** | Build tree in UI, import from disk, per-folder descriptions and rules |
 | M5 | **Review + undo** | Confidence gate, Review list, undo single move / whole run, preview mode |
 | M6 | **Learning** | Bootstrap on existing files, correction capture (explicit + implicit), background fine-tune with safety check |
 | M7 | **Stats + polish** | Stats screen, launch at login, pause, battery awareness, onboarding flow |
 | M8 | **Release** | Bundled Python + PyTorch, signed + notarized `.dmg` on GitHub Releases, README with install steps and demo GIF |
+
+**Status (2026-09-26):** M0–M3 done on branch `feat/m0-m3`. The M2 screens shipped so far are the menu-bar popover, Settings (Scope / General / Engine) and a read-only Activity window; Review, undo and the full rule editor are M4–M5.
 
 M0–M1 carry the most risk (does a small local open-jev sort well enough?), so they come first. M2–M5 can use a stub engine in parallel.
 

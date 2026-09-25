@@ -31,47 +31,56 @@ So the main engineering work in this project is **making open-jev actually know 
 
 ### 3.1 The question
 
-Per file:
+Per file (`engine/jevsort_engine/state.py` and `model.py`):
 ```python
-state = {"name": ..., "ext": ..., "kind": ..., "where_from": [...], "text": "<first N KB>"}
+state = {"name": "2025 W2 acme", "ext": "pdf", "kind": "PDF document",
+         "source": "payroll.acme.com", "title": ..., "text": "<first N KB, max 1,500 chars>"}
 Choice("Which folder does this file belong in?",
-       options=[f"{path}: {description}" for folder in tree])
+       options=[f"{path}: {description}" for folder in allowed_folders] + ["none of these folders fit this file"])
 ```
 
-- Each option is the folder path plus its description, so the model can match meaning ("W-2" → *Finance/Taxes: tax documents*).
-- One file is one state; a scan's batch of files runs as one batched forward pass.
-- Trees with more than 255 folders (the Choice limit) are handled in two stages: first pick the top-level folder, then choose within it.
-- Per-folder option embeddings are cached until the tree changes.
+- Each option is the folder path (as `Finance / Taxes`) plus its description, so the model can match meaning ("W-2" → *Finance / Taxes: tax documents*).
+- The last option is always the reserved **`__none__`**. A file that doesn't belong anywhere can say so, instead of being forced into the nearest folder. It stays where it is.
+- The engine gets folder **ids** from the app and only ever returns one of them. It never sees or returns a path.
+- Filenames are humanised (`2025_W2-acmeCorp.pdf` → `2025 W2 acme Corp`), and "Where from" URLs are reduced to domains.
+- Files are batched 16 at a time per forward pass against one Choice.
+- Trees with more than 254 folders (open-jev's 255-option cap, minus `__none__`) are handled in two stages: pick a top-level folder, then choose within it.
 
 ### 3.2 Confidence
 
-We gate on the model's calibrated `confidence` (and the top-1 vs. top-2 margin). This is why RLCD's calibration terms matter: a threshold of 0.75 has to *mean* ~75% right, or auto-moving is unsafe. We measure calibration (ECE) on every checkpoint.
+`confidence` is the top-1 probability of the Choice softmax. The app auto-moves only when it's ≥ the user's threshold (default 0.75) and the answer isn't `__none__`. RLCD's calibration terms are what make this safe: a threshold of 0.9 should *mean* about 90% right. We measure calibration (ECE) on every checkpoint. open-jev's separate evidential `head_confidence` isn't used for gating yet.
 
-## 4. Changes to open-jev
+## 4. Changes around open-jev
 
-We vendor open-jev into `engine/third_party/open_jev/` with attribution, and make the minimum changes needed:
+open-jev is vendored **unmodified** in `engine/third_party/open_jev/` (commit `93843ef`, Apache-2.0). Everything below is done from the outside:
 
-1. **Pretrained tokenizer + embeddings.** Replace `HashTokenizer` with a small pretrained subword tokenizer and initialise the token embeddings (and optionally the text encoder) from a small pretrained English encoder (MiniLM-class, ~20–30M params). This gives the model language knowledge on day one instead of learning English from our small dataset.
-2. **File-state field schema.** Stable keys (`name`, `ext`, `kind`, `where_from`, `text`) so path embeddings learn what each field means.
-3. **Size tuned for a Mac.** Target ≤ 50M parameters, ≤ 100 MB on disk, < 50 ms per file on an M1 via MPS.
-4. **Checkpoint save/load + versioning.**
+1. **Pretrained tokenizer.** `PretrainedTokenizer` implements open-jev's tokenizer interface (`encode`, `encode_batch`, `PAD`) using the all-MiniLM-L6-v2 WordPiece vocabulary (30,522 tokens, bundled as `assets/minilm-tokenizer.json`), and is passed in as `Jev(cfg, tokenizer=...)`.
+2. **Pretrained, tied, frozen word embeddings.** The state encoder's and text encoder's token tables become **one shared table**, initialised from MiniLM's word embeddings and **frozen**. That removes 23M trainable parameters, which was the difference between 0.3 and ~2.3 training steps per second on an 8 GB Mac. Words the synthetic corpus never uses (brand names, German) also keep their pretrained meaning.
+3. **Rescaled structural embeddings.** open-jev initialises every embedding at N(0, 1), which would drown MiniLM's vectors (std ≈ 0.056). Depth, sibling, path and position embeddings start at std 0.02 instead.
+4. **Size.** `d_model` 384, 6 heads, `d_ff` 1024, 4 state layers, 2 question layers, 4 read-out layers, 8 slots, `max_state_len` 512. That's 30.4M parameters in total, of which 18.7M are trainable. The checkpoint is 58 MB in fp16, including the embedding table.
+5. **CPU by default.** At this size the CPU beats MPS: kernel-launch overhead dominates, and the CPU avoids a ~1 s Metal warm-up. Set `JEVSORT_DEVICE=mps` to override.
 
-Anything generally useful (e.g. the tokenizer swap) should be offered back upstream as a PR to open-jev.
+The tokenizer swap is a candidate to offer upstream as a PR to open-jev.
 
-## 5. Training plan
+## 5. Training
 
-### Stage A: base model (done by us, shipped in the DMG)
+### Stage A: base model (M1, done)
 
-Goal: a general-purpose "file → folder" chooser that works reasonably on an unseen folder tree before any personalisation.
+Goal: a general-purpose "file → folder" chooser that works reasonably on a folder tree it has never seen, before any personalisation.
 
-- **Data:** a synthetic corpus of (file state, folder tree, correct folder) examples:
-  - Realistic filenames, metadata and text snippets across common categories (finance, receipts, work docs, school, code, screenshots, installers, media, travel, health, legal, ...).
-  - Many different random folder trees with varied naming ("Money/Bills" vs "Finance/Invoices") so the model learns to match *meaning*, not memorise folder names.
-  - Hard negatives: sibling folders that are close in meaning.
-  - Soft targets where the label is genuinely ambiguous (RLCD is built for this).
-  - Built by scripts in `engine/datasets/`, generated once on the developer's machine. Nothing in the shipped app calls any service.
-- **Augmentation:** shuffle keys, drop fields, truncate text, shuffle option order (consistency term in RLCD).
-- **Eval:** a hand-labelled held-out set of real-world-style messy files. Track top-1 accuracy, accuracy at the default threshold, coverage (% auto-moved), and ECE.
+- **Data** (`engine/datasets/`), generated on the fly, so the stream is effectively unlimited:
+  - `ontology.py`: 40 file concepts across 12 groups (tax forms, bank statements, receipts, invoices, payslips, contracts, lecture notes, assignments, papers, ebooks, photos, screenshots, installers, code, datasets, bookings, medical, …). Each concept has filename templates, extensions, source domains, text-snippet templates, and 3–6 **folder-name synonyms** per concept and group.
+  - `generate.py`: random trees (flat, grouped, 3-level "Personal/Work" and mixed layouts, about 3–30 folders) with optional descriptions. Each batch holds 16 files from one tree. 20% of files come from concepts that aren't in the tree.
+  - **Soft targets:** 0.9 on the right leaf and 0.05 on its parent; if the leaf is missing, 0.85 on the parent group folder; 0.65–1.0 on `__none__` when nothing fits; a little mass on closely related folders (receipts ↔ invoices).
+  - Hard cases: 30% of files with text have a bland name (`document`, `scan0001`), so only the content tells you what they are.
+- **Augmentation:** drop metadata fields and truncate text, used for the RLCD consistency term. Option order is shuffled by tree construction.
+- **Objective:** open-jev's `RLCDLoss` (soft NLL + Brier + consistency + evidential + ECE), AdamW at lr 3e-4 with warmup and cosine decay, and gradient clipping.
+- **Model selection:** on a *synthetic* validation set only. The held-out set below is reported, never selected on.
+- **Held-out eval** (`engine/datasets/eval/messy.py`): 150 hand-written files over three fixed trees (student, freelancer, minimal-with-descriptions). It uses brands, languages (German invoices and tax notices) and phrasing the generator never uses. Several answers may be acceptable, and "should stay put" is a valid answer.
+
+#### Results
+
+RESULTS_PLACEHOLDER
 
 ### Stage B: bootstrap on the user's tree (on-device, first run)
 
@@ -82,7 +91,7 @@ Files already sitting inside the user's destination folders are labelled example
 
 ### Stage C: learning from corrections (on-device, ongoing)
 
-Correction signals (see PRD 4.8): Review choices, undo + re-file, and implicit moves detected by the scanner.
+Correction signals (see PRD 5.8): Review choices, undo + re-file, and implicit moves detected by the scanner.
 - Stored as training examples in SQLite.
 - Fine-tune when ≥ 20 new examples have built up, the Mac is idle and on power (or *Retrain now* in Settings).
 - **Safety check:** a new checkpoint is only activated if it doesn't do worse on a held-out slice of the user's examples than the current one; otherwise it's discarded. The previous checkpoint is always kept for rollback.

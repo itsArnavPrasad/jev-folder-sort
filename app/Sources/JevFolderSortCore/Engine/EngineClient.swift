@@ -109,6 +109,8 @@ public actor EngineClient: FolderClassifier {
     private var stdin: FileHandle?
     private var buffer = Data()
     private var nextID = 0
+    private var generation: UUID?
+    private var reader: Task<Void, Never>?
     private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
     public private(set) var health: EngineHealth?
 
@@ -131,14 +133,28 @@ public actor EngineClient: FolderClassifier {
         p.standardInput = inPipe
         p.standardOutput = outPipe
         p.standardError = FileHandle.standardError
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // Chunks must be consumed in arrival order, so they go through one
+        // ordered stream and a single reader task, not a Task per chunk.
+        let (chunks, sink) = AsyncStream<Data>.makeStream()
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            Task { await self?.receive(data) }
+            if data.isEmpty {
+                handle.readabilityHandler = nil  // EOF
+                sink.finish()
+            } else {
+                sink.yield(data)
+            }
         }
-        p.terminationHandler = { [weak self] _ in Task { await self?.exited() } }
+        let generation = UUID()
+        p.terminationHandler = { [weak self] _ in Task { await self?.exited(generation) } }
         do { try p.run() } catch { throw EngineError.launchFailed(error.localizedDescription) }
         process = p
+        self.generation = generation
         stdin = inPipe.fileHandleForWriting
+        buffer.removeAll()
+        reader = Task { [weak self] in
+            for await chunk in chunks { await self?.receive(chunk) }
+        }
 
         let json = try await request(["op": "health"])
         let data = try JSONSerialization.data(withJSONObject: json)
@@ -156,8 +172,11 @@ public actor EngineClient: FolderClassifier {
             try? stdin.write(contentsOf: Data(#"{"op":"shutdown"}"#.utf8 + [0x0A]))
         }
         process?.terminate()
-        process = nil
-        health = nil
+        exitedNow()
+    }
+
+    private func exitedNow() {
+        if let generation { exited(generation) }
     }
 
     public func classify(tree: [EngineFolder], files: [EngineFile]) async throws -> [EngineDecision] {
@@ -214,7 +233,11 @@ public actor EngineClient: FolderClassifier {
         pending.removeValue(forKey: id)?.resume(throwing: error)
     }
 
-    private func exited() {
+    private func exited(_ which: UUID) {
+        guard which == generation else { return }  // an older process we already replaced
+        generation = nil
+        reader?.cancel()
+        reader = nil
         process = nil
         stdin = nil
         health = nil
