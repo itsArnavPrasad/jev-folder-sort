@@ -40,6 +40,7 @@ extension HistoryEntry.Status {
         case .pending: "To review"
         case .preview: "Suggested"
         case .refused: "Refused"
+        case .undone: "Undone"
         }
     }
 
@@ -49,6 +50,7 @@ extension HistoryEntry.Status {
         case .pending: "questionmark.circle"
         case .preview: "eye"
         case .refused: "xmark.octagon"
+        case .undone: "arrow.uturn.backward.circle"
         }
     }
 
@@ -58,6 +60,7 @@ extension HistoryEntry.Status {
         case .pending: .orange
         case .preview: .blue
         case .refused: .red
+        case .undone: .secondary
         }
     }
 }

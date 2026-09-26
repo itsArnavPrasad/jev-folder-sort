@@ -11,6 +11,8 @@ public struct AppSettings: Equatable, Sendable {
     public var paused = false
     public var engineDirectory = ""
     public var useStubEngine = false
+    public var learningEnabled = true
+    public var onboardingDone = false
 
     public init() {}
 }
@@ -34,7 +36,7 @@ public struct Rule: Equatable, Sendable, Identifiable {
 }
 
 public struct HistoryEntry: Equatable, Sendable, Identifiable {
-    public enum Status: String, Sendable { case moved, refused, preview, pending }
+    public enum Status: String, Sendable { case moved, refused, preview, pending, undone }
 
     public var id: Int64?
     public var runID: Int64
@@ -47,6 +49,37 @@ public struct HistoryEntry: Equatable, Sendable, Identifiable {
     public var confidence: Double?
     public var status: Status
     public var detail: String?
+    public var destinationInode: Int64?
+    public var latencyMs: Double?
+    public var undoneAt: Date?
+    public var correctedTo: String?
+
+    public init(id: Int64? = nil, runID: Int64, at: Date, fileName: String, sourcePath: String,
+                destinationPath: String? = nil, folderPath: String? = nil, reason: String, confidence: Double? = nil,
+                status: Status, detail: String? = nil, destinationInode: Int64? = nil, latencyMs: Double? = nil,
+                undoneAt: Date? = nil, correctedTo: String? = nil) {
+        self.id = id; self.runID = runID; self.at = at; self.fileName = fileName; self.sourcePath = sourcePath
+        self.destinationPath = destinationPath; self.folderPath = folderPath; self.reason = reason
+        self.confidence = confidence; self.status = status; self.detail = detail
+        self.destinationInode = destinationInode; self.latencyMs = latencyMs; self.undoneAt = undoneAt
+        self.correctedTo = correctedTo
+    }
+}
+
+public struct PendingItem: Equatable, Sendable, Identifiable {
+    public struct Suggestion: Equatable, Sendable { public var folderPath: String; public var p: Double }
+    public var id: String { path }
+    public var path: String
+    public var at: Date
+    public var reason: String
+    public var suggestions: [Suggestion]
+}
+
+public struct TrainingExample: Equatable, Sendable {
+    public var key: String
+    public var state: FileState
+    public var folderID: String
+    public var source: String  // bootstrap, review, refile, implicit
 }
 
 public struct RunRecord: Equatable, Sendable {
@@ -131,6 +164,16 @@ public final class AppDatabase: @unchecked Sendable {
                 suggestions TEXT NOT NULL, reason TEXT NOT NULL);
             """)
         }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: """
+            ALTER TABLE move_history ADD COLUMN dest_inode INTEGER;
+            ALTER TABLE move_history ADD COLUMN latency_ms REAL;
+            ALTER TABLE move_history ADD COLUMN corrected_to TEXT;
+            CREATE TABLE training_example (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, key TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL, folder_id TEXT NOT NULL, source TEXT NOT NULL);
+            """)
+        }
         return m
     }
 
@@ -150,6 +193,8 @@ public final class AppDatabase: @unchecked Sendable {
         s.paused = kv["paused"] == "1"
         s.engineDirectory = kv["engineDirectory"] ?? ""
         s.useStubEngine = kv["useStubEngine"] == "1"
+        s.learningEnabled = kv["learningEnabled"] != "0"
+        s.onboardingDone = kv["onboardingDone"] == "1"
         return s
     }
 
@@ -159,6 +204,7 @@ public final class AppDatabase: @unchecked Sendable {
             "textLimitKB": String(s.textLimitKB), "previewMode": s.previewMode ? "1" : "0",
             "paused": s.paused ? "1" : "0", "engineDirectory": s.engineDirectory,
             "useStubEngine": s.useStubEngine ? "1" : "0",
+            "learningEnabled": s.learningEnabled ? "1" : "0", "onboardingDone": s.onboardingDone ? "1" : "0",
         ]
         try queue.write { db in
             for (k, v) in kv {
@@ -282,21 +328,62 @@ public final class AppDatabase: @unchecked Sendable {
     public func add(history e: HistoryEntry) throws {
         try queue.write { db in
             try db.execute(sql: """
-                INSERT INTO move_history(run_id, at, file_name, source_path, dest_path, folder_path, reason, confidence, status, detail)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO move_history(run_id, at, file_name, source_path, dest_path, folder_path, reason, confidence,
+                                         status, detail, dest_inode, latency_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [e.runID, e.at.timeIntervalSince1970, e.fileName, e.sourcePath, e.destinationPath,
-                                 e.folderPath, e.reason, e.confidence, e.status.rawValue, e.detail])
+                                 e.folderPath, e.reason, e.confidence, e.status.rawValue, e.detail,
+                                 e.destinationInode, e.latencyMs])
         }
+    }
+
+    public func entry(id: Int64) throws -> HistoryEntry? {
+        try queue.read { db in try Row.fetchOne(db, sql: "SELECT * FROM move_history WHERE id = ?", arguments: [id]).map(Self.history(row:)) }
+    }
+
+    public func movedEntries(run: Int64) throws -> [HistoryEntry] {
+        try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM move_history WHERE run_id = ? AND status = 'moved' AND undone_at IS NULL ORDER BY id DESC",
+                             arguments: [run]).map(Self.history(row:))
+        }
+    }
+
+    /// Moves in the last `days` that haven't been undone or already seen as corrected.
+    public func recentMoves(days: Int = 30) throws -> [HistoryEntry] {
+        let since = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+        return try queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM move_history WHERE status = 'moved' AND undone_at IS NULL AND corrected_to IS NULL
+                AND dest_inode IS NOT NULL AND at >= ?
+                """, arguments: [since]).map(Self.history(row:))
+        }
+    }
+
+    public func markUndone(_ id: Int64) throws {
+        try queue.write { db in
+            try db.execute(sql: "UPDATE move_history SET undone_at = ? WHERE id = ?", arguments: [Date().timeIntervalSince1970, id])
+        }
+    }
+
+    public func markCorrected(_ id: Int64, to folderPath: String) throws {
+        try queue.write { db in
+            try db.execute(sql: "UPDATE move_history SET corrected_to = ? WHERE id = ?", arguments: [folderPath, id])
+        }
+    }
+
+    static func history(row r: Row) -> HistoryEntry {
+        HistoryEntry(id: r["id"], runID: r["run_id"], at: Date(timeIntervalSince1970: r["at"]),
+                     fileName: r["file_name"], sourcePath: r["source_path"], destinationPath: r["dest_path"],
+                     folderPath: r["folder_path"], reason: r["reason"], confidence: r["confidence"],
+                     status: HistoryEntry.Status(rawValue: r["status"]) ?? .refused, detail: r["detail"],
+                     destinationInode: r["dest_inode"], latencyMs: r["latency_ms"],
+                     undoneAt: (r["undone_at"] as Double?).map(Date.init(timeIntervalSince1970:)),
+                     correctedTo: r["corrected_to"])
     }
 
     public func history(limit: Int = 500) throws -> [HistoryEntry] {
         try queue.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM move_history ORDER BY at DESC, id DESC LIMIT ?", arguments: [limit]).map {
-                HistoryEntry(id: $0["id"], runID: $0["run_id"], at: Date(timeIntervalSince1970: $0["at"]),
-                             fileName: $0["file_name"], sourcePath: $0["source_path"], destinationPath: $0["dest_path"],
-                             folderPath: $0["folder_path"], reason: $0["reason"], confidence: $0["confidence"],
-                             status: HistoryEntry.Status(rawValue: $0["status"]) ?? .refused, detail: $0["detail"])
-            }
+            try Row.fetchAll(db, sql: "SELECT * FROM move_history ORDER BY at DESC, id DESC LIMIT ?", arguments: [limit]).map(Self.history(row:))
         }
     }
 
@@ -341,5 +428,67 @@ public final class AppDatabase: @unchecked Sendable {
 
     public func pendingPaths() throws -> [String] {
         try queue.read { db in try String.fetchAll(db, sql: "SELECT path FROM pending_review ORDER BY at DESC") }
+    }
+
+    public func pendingItems() throws -> [PendingItem] {
+        try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM pending_review ORDER BY at DESC").map { r in
+                let raw = (r["suggestions"] as String).data(using: .utf8) ?? Data()
+                let list = (try? JSONSerialization.jsonObject(with: raw) as? [[String: Any]]) ?? []
+                return PendingItem(path: r["path"], at: Date(timeIntervalSince1970: r["at"]), reason: r["reason"],
+                                   suggestions: list.compactMap { d in
+                                       guard let f = d["folder"] as? String, let p = d["p"] as? Double else { return nil }
+                                       return .init(folderPath: f, p: p)
+                                   })
+            }
+        }
+    }
+
+    // MARK: learning
+
+    /// Insert or replace an example (same key = same file/event).
+    public func add(example e: TrainingExample) throws {
+        let state = try String(decoding: JSONEncoder().encode(e.state), as: UTF8.self)
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO training_example(at, key, state, folder_id, source) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET at = excluded.at, state = excluded.state,
+                    folder_id = excluded.folder_id, source = excluded.source
+                """, arguments: [Date().timeIntervalSince1970, e.key, state, e.folderID, e.source])
+        }
+    }
+
+    public func examples() throws -> [TrainingExample] {
+        try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM training_example ORDER BY id").compactMap { r in
+                guard let data = (r["state"] as String).data(using: .utf8),
+                      let state = try? JSONDecoder().decode(FileState.self, from: data) else { return nil }
+                return TrainingExample(key: r["key"], state: state, folderID: r["folder_id"], source: r["source"])
+            }
+        }
+    }
+
+    public func exampleCounts() throws -> [String: Int] {
+        try queue.read { db in
+            var out: [String: Int] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT source, COUNT(*) AS n FROM training_example GROUP BY source") {
+                out[r["source"]] = r["n"]
+            }
+            return out
+        }
+    }
+
+    public func value(_ key: String) throws -> String? {
+        try queue.read { db in try String.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ?", arguments: [key]) }
+    }
+
+    public func set(_ key: String, _ value: String?) throws {
+        try queue.write { db in
+            if let value {
+                try db.execute(sql: "INSERT INTO setting(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", arguments: [key, value])
+            } else {
+                try db.execute(sql: "DELETE FROM setting WHERE key = ?", arguments: [key])
+            }
+        }
     }
 }

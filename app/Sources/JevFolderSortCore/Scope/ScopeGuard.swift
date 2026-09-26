@@ -15,6 +15,7 @@ public enum ScopeViolation: Error, Equatable, Sendable, CustomStringConvertible 
     case destinationChanged
     case crossVolume
     case alreadyInDestination
+    case cannotUndo(String)
     case moveFailed(String)
 
     public var description: String {
@@ -32,6 +33,7 @@ public enum ScopeViolation: Error, Equatable, Sendable, CustomStringConvertible 
         case .destinationChanged: "destination folder was replaced by a symlink or moved"
         case .crossVolume: "source and destination are on different volumes"
         case .alreadyInDestination: "file is already in that folder"
+        case .cannotUndo(let r): "can't undo: \(r)"
         case .moveFailed(let e): "move failed: \(e)"
         }
     }
@@ -128,14 +130,54 @@ public struct ScopeGuard: Sendable {
         }
     }
 
-    private func perform(_ m: ValidatedMove) -> Result<MoveOutcome, ScopeViolation> {
+    /// Put a file the app moved back where it came from.
+    ///
+    /// Only possible if the file is still exactly where the app put it (same
+    /// inode), that place is inside the destination root, and the original
+    /// folder is still a watched folder. Never overwrites: a file now sitting
+    /// at the old name gets the Finder-style suffix instead.
+    public func undo(_ entry: HistoryEntry) -> Result<MoveOutcome, ScopeViolation> {
+        let issues = config.issues(policy: policy)
+        guard issues.isEmpty else { return .failure(.scopeInvalid(issues.map(\.message))) }
+        guard let root = config.root else { return .failure(.scopeInvalid(["no root"])) }
+        guard entry.status == .moved, entry.undoneAt == nil, let dest = entry.destinationPath else {
+            return .failure(.cannotUndo("this entry isn't an undoable move"))
+        }
+        var st = stat()
+        guard lstat(dest, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG else {
+            return .failure(.cannotUndo("the file is no longer where it was moved to"))
+        }
+        if let inode = entry.destinationInode, Int64(st.st_ino) != inode {
+            return .failure(.cannotUndo("a different file is now at that path"))
+        }
+        guard let cdestParent = ScopePaths.canonical((dest as NSString).deletingLastPathComponent),
+              ScopePaths.isStrictlyInside(cdestParent, root)
+        else { return .failure(.destinationOutsideRoot) }
+
+        let originalParent = (entry.sourcePath as NSString).deletingLastPathComponent
+        let watched = config.sources.compactMap(ScopePaths.canonical)
+        guard let cparent = ScopePaths.canonical(originalParent), watched.contains(cparent) else {
+            return .failure(.cannotUndo("the original folder is no longer watched"))
+        }
+        var pst = stat()
+        guard stat(cparent, &pst) == 0, pst.st_dev == st.st_dev else { return .failure(.crossVolume) }
+
+        let name = (entry.sourcePath as NSString).lastPathComponent
+        let move = ValidatedMove(
+            sourcePath: cdestParent + "/" + (dest as NSString).lastPathComponent,
+            folder: DestinationFolder(id: "undo", relativePath: ""), destinationDirectory: cparent,
+            device: st.st_dev, inode: st.st_ino)
+        return perform(move, name: name)
+    }
+
+    private func perform(_ m: ValidatedMove, name override: String? = nil) -> Result<MoveOutcome, ScopeViolation> {
         // Re-check at the last moment: same file (device + inode) still at the path.
         var st = stat()
         guard lstat(m.sourcePath, &st) == 0, st.st_dev == m.device, st.st_ino == m.inode,
               (st.st_mode & S_IFMT) == S_IFREG
         else { return .failure(.sourceMissing) }
 
-        let name = (m.sourcePath as NSString).lastPathComponent
+        let name = override ?? (m.sourcePath as NSString).lastPathComponent
         for candidate in Self.candidateNames(for: name) {
             let target = m.destinationDirectory + "/" + candidate
             // RENAME_EXCL: atomic, and fails with EEXIST instead of overwriting.

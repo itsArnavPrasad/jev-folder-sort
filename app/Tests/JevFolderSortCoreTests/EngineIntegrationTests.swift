@@ -5,6 +5,7 @@ import Testing
 private let engineDir = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().appendingPathComponent("../../../engine").standardized.path
 private let hasEngine = FileManager.default.isExecutableFile(atPath: engineDir + "/.venv/bin/python")
+private let hasCheckpoint = FileManager.default.fileExists(atPath: engineDir + "/checkpoints/base/model.safetensors")
 
 @Suite("Real engine (stub mode, sandboxed)", .enabled(if: hasEngine, "run `uv sync` in engine/ first"))
 struct EngineIntegrationTests {
@@ -43,5 +44,33 @@ struct EngineIntegrationTests {
         #expect(results.map(\.file) == files.map(\.id))
         #expect(results.allSatisfy { r in r.choice == EngineDecision.noneID || tree.contains { $0.id == r.choice } })
         await client.stop()
+    }
+
+    /// Bootstrap from files already in the tree, fine-tune in a sandboxed
+    /// trainer process, and write the user model only inside the models dir.
+    @Test(.enabled(if: hasCheckpoint, "needs engine/checkpoints/base"))
+    func personalisationEndToEnd() async throws {
+        let fx = try Fixture(folders: ["Recipes", "Rockets"])
+        for i in 0..<8 {
+            try fx.file("Sorted/Recipes/bread \(i).txt", "banana bread flour sugar oven bake \(i)")
+            try fx.file("Sorted/Rockets/launch \(i).txt", "rocket launch orbit thrust booster \(i)")
+        }
+        let db = try AppDatabase()
+        try db.save(fx.scope)
+        let models = fx.home + "/models"
+        let launch = try EngineLaunch.development(engineDirectory: engineDir, stub: false, modelDirectory: models)
+        let learner = Learner(db: db, policy: fx.policy, launch: launch)
+        let report = try await learner.train(steps: 40)
+        #expect(report.examples == 16)
+        #expect(report.holdout == 3)
+        #expect(try learner.status().lastReport == report)
+        if report.activated {
+            #expect(FileManager.default.fileExists(atPath: models + "/user/model.safetensors"))
+            #expect(launch.activeCheckpoint == models + "/user")
+            try await learner.reset()
+            #expect(!FileManager.default.fileExists(atPath: models + "/user"))
+        }
+        // Nothing in the tree was moved.
+        #expect(fx.exists("Sorted/Recipes/bread 0.txt") && fx.exists("Sorted/Rockets/launch 7.txt"))
     }
 }

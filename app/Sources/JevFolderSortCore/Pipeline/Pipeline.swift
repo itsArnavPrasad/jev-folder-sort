@@ -32,6 +32,9 @@ public final class Pipeline: @unchecked Sendable {
             return run
         }
         let guardrail = ScopeGuard(config: scope, policy: policy)
+        if settings.learningEnabled {
+            _ = try? LearningCollector(db: db, policy: policy).detectImplicitCorrections(textLimitKB: settings.textLimitKB)
+        }
         let folders = Dictionary(uniqueKeysWithValues: scope.allowedFolders.map { ($0.id, $0) })
 
         let scan = try await scanner.scan(sources: scope.sources, snapshot: db.snapshot(under:))
@@ -47,7 +50,7 @@ public final class Pipeline: @unchecked Sendable {
         for entry in scan.candidates {
             let state = extractor.extract(path: entry.path)
             if let hit = rules.match(state) {
-                decisions[entry.path] = Decision(folderID: hit.folderID, confidence: 1, reason: "rule", suggestions: [])
+                decisions[entry.path] = Decision(folderID: hit.folderID, confidence: 1, reason: "rule", suggestions: [], latencyMs: nil)
             } else {
                 forModel.append((entry, state))
             }
@@ -62,7 +65,8 @@ public final class Pipeline: @unchecked Sendable {
                 for (i, item) in forModel.enumerated() {
                     guard let a = answers["c\(i)"] else { continue }
                     let suggestions = a.top.compactMap { s in folders[s.folder].map { ($0.relativePath, s.p) } }
-                    decisions[item.entry.path] = Decision(folderID: a.choice, confidence: a.confidence, reason: "model", suggestions: suggestions)
+                    decisions[item.entry.path] = Decision(folderID: a.choice, confidence: a.confidence, reason: "model",
+                                                          suggestions: suggestions, latencyMs: a.latencyMs)
                 }
             } catch {
                 // No decision means no move; these files are retried next run.
@@ -76,7 +80,7 @@ public final class Pipeline: @unchecked Sendable {
             let name = (entry.path as NSString).lastPathComponent
             var h = HistoryEntry(runID: run.id!, at: Date(), fileName: name, sourcePath: entry.path,
                                  folderPath: folders[d.folderID]?.relativePath, reason: d.reason,
-                                 confidence: d.confidence, status: .pending)
+                                 confidence: d.confidence, status: .pending, latencyMs: d.latencyMs)
 
             let confident = d.folderID != EngineDecision.noneID && folders[d.folderID] != nil
                 && d.confidence >= settings.confidenceThreshold
@@ -95,6 +99,7 @@ public final class Pipeline: @unchecked Sendable {
             case .success(let outcome):
                 h.status = .moved
                 h.destinationPath = outcome.destinationPath
+                h.destinationInode = Scanner.entry(outcome.destinationPath)?.inode
                 try db.clearPending(path: entry.path)
                 run.moved += 1
             case .failure(let violation):
@@ -115,5 +120,6 @@ public final class Pipeline: @unchecked Sendable {
         var confidence: Double
         var reason: String
         var suggestions: [(folderPath: String, p: Double)]
+        var latencyMs: Double?
     }
 }

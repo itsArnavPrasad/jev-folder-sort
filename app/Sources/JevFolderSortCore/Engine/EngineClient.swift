@@ -67,20 +67,72 @@ public struct EngineLaunch: Sendable {
     public var python: String
     public var arguments: [String]
     public var workingDirectory: String
+    public var environment: [String: String] = [:]
+    /// Writable by the engine (the sandbox allows nothing else): holds `user/`.
     public var modelDirectory: String
+    /// Read-only shipped checkpoint.
+    public var baseCheckpoint: String?
+    public var stub = false
+
+    public var userCheckpoint: String { modelDirectory + "/user" }
+
+    /// Which checkpoint to serve: the personalised one if it exists, else base.
+    public var activeCheckpoint: String? {
+        if FileManager.default.fileExists(atPath: userCheckpoint + "/model.safetensors") { return userCheckpoint }
+        return baseCheckpoint
+    }
+
+    func serverArguments(stubOverride: Bool? = nil) -> [String] {
+        let stub = stubOverride ?? self.stub
+        guard !stub, let checkpoint = activeCheckpoint else { return arguments + ["--stub"] }
+        return arguments + ["--model", checkpoint]
+    }
+
+    /// The engine bundled inside the .app (release builds), if present.
+    public static func bundled(modelDirectory: String, stub: Bool) -> EngineLaunch? {
+        guard let res = Bundle.main.resourcePath else { return nil }
+        let root = res + "/engine"
+        let python = root + "/python/bin/python3"
+        guard FileManager.default.isExecutableFile(atPath: python) else { return nil }
+        let base = root + "/checkpoints/base"
+        return EngineLaunch(
+            python: python, arguments: ["-s", "-m", "jevsort_engine.server"], workingDirectory: root,
+            environment: ["PYTHONPATH": root + "/app:" + root + "/site-packages", "PYTHONNOUSERSITE": "1",
+                          "PYTHONDONTWRITEBYTECODE": "1"],
+            modelDirectory: modelDirectory,
+            baseCheckpoint: FileManager.default.fileExists(atPath: base + "/model.safetensors") ? base : nil, stub: stub)
+    }
 
     /// `engineDirectory` is the repo's `engine/` folder (a uv project).
-    public static func development(engineDirectory: String, stub: Bool) throws -> EngineLaunch {
+    public static func development(engineDirectory: String, stub: Bool, modelDirectory: String? = nil) throws -> EngineLaunch {
         let dir = (engineDirectory as NSString).expandingTildeInPath
         let python = dir + "/.venv/bin/python"
         guard FileManager.default.isExecutableFile(atPath: python) else {
             throw EngineError.notConfigured("no Python at \(python) — run `uv sync` in the engine folder")
         }
-        let checkpoint = dir + "/checkpoints/base"
-        let hasModel = FileManager.default.fileExists(atPath: checkpoint + "/model.safetensors")
-        var args = ["-m", "jevsort_engine.server"]
-        args += (stub || !hasModel) ? ["--stub"] : ["--model", checkpoint]
-        return EngineLaunch(python: python, arguments: args, workingDirectory: dir, modelDirectory: dir + "/checkpoints")
+        let base = dir + "/checkpoints/base"
+        return EngineLaunch(
+            python: python, arguments: ["-m", "jevsort_engine.server"], workingDirectory: dir,
+            modelDirectory: modelDirectory ?? dir + "/checkpoints",
+            baseCheckpoint: FileManager.default.fileExists(atPath: base + "/model.safetensors") ? base : nil, stub: stub)
+    }
+}
+
+public struct TrainReport: Codable, Equatable, Sendable {
+    public var examples: Int
+    public var dropped: Int?
+    public var activated: Bool
+    public var reason: String?
+    public var holdout: Int?
+    public var newAccuracy: Double?
+    public var currentAccuracy: Double?
+    public var steps: Int?
+    public var seconds: Double?
+    public var version: String?
+
+    enum CodingKeys: String, CodingKey {
+        case examples, dropped, activated, reason, holdout, steps, seconds, version
+        case newAccuracy = "new_accuracy", currentAccuracy = "current_accuracy"
     }
 }
 
@@ -114,20 +166,27 @@ public actor EngineClient: FolderClassifier {
     private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
     public private(set) var health: EngineHealth?
 
-    public init(launch: EngineLaunch, timeout: Duration = .seconds(120)) {
+    private let stubOverride: Bool?
+
+    /// `stubOverride: true` starts the engine without loading a model (used for training jobs).
+    public init(launch: EngineLaunch, timeout: Duration = .seconds(120), stubOverride: Bool? = nil) {
         self.launch = launch
         self.timeout = timeout
+        self.stubOverride = stubOverride
     }
 
     public func start() async throws -> EngineHealth {
         if process?.isRunning == true, let health { return health }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
-        p.arguments = ["-p", Self.sandboxProfile, "-D", "MODEL_DIR=\(launch.modelDirectory)", launch.python] + launch.arguments
+        try? FileManager.default.createDirectory(atPath: launch.modelDirectory, withIntermediateDirectories: true)
+        p.arguments = ["-p", Self.sandboxProfile, "-D", "MODEL_DIR=\(launch.modelDirectory)", launch.python]
+            + launch.serverArguments(stubOverride: stubOverride)
         p.currentDirectoryURL = URL(fileURLWithPath: launch.workingDirectory)
         var env = ProcessInfo.processInfo.environment
         env["PYTHONUNBUFFERED"] = "1"
         env["HF_HUB_OFFLINE"] = "1"
+        for (k, v) in launch.environment { env[k] = v }
         p.environment = env
         let inPipe = Pipe(), outPipe = Pipe()
         p.standardInput = inPipe
@@ -189,6 +248,33 @@ public actor EngineClient: FolderClassifier {
         let json = try await request(body)
         let data = try JSONSerialization.data(withJSONObject: json["results"] ?? [])
         return try JSONDecoder().decode([EngineDecision].self, from: data)
+    }
+
+    /// Fine-tune on the user's examples (M6). Runs in this engine process;
+    /// writes only to `launch.userCheckpoint` (inside the sandbox's MODEL_DIR).
+    public func train(tree: [EngineFolder], examples: [(state: FileState, folderID: String)], steps: Int? = nil) async throws -> TrainReport {
+        if process?.isRunning != true { _ = try await start() }
+        guard let base = launch.baseCheckpoint else { throw EngineError.notConfigured("no base checkpoint to personalise") }
+        let encoded = try examples.map { e -> [String: Any] in
+            ["state": try JSONSerialization.jsonObject(with: JSONEncoder().encode(e.state)), "target": e.folderID]
+        }
+        var body: [String: Any] = [
+            "op": "train_user", "base": base, "out": launch.userCheckpoint,
+            "tree": try JSONSerialization.jsonObject(with: JSONEncoder().encode(tree)), "examples": encoded,
+        ]
+        if FileManager.default.fileExists(atPath: launch.userCheckpoint + "/model.safetensors") {
+            body["current"] = launch.userCheckpoint
+        }
+        if let steps { body["steps"] = steps }
+        let json = try await request(body)
+        let data = try JSONSerialization.data(withJSONObject: json["report"] ?? [:])
+        return try JSONDecoder().decode(TrainReport.self, from: data)
+    }
+
+    /// Forget the personalised model (the engine deletes its own `user/` directory).
+    public func resetUserModel() async throws {
+        if process?.isRunning != true { _ = try await start() }
+        _ = try await request(["op": "reset_user", "out": launch.userCheckpoint])
     }
 
     private func request(_ body: [String: Any]) async throws -> [String: Any] {

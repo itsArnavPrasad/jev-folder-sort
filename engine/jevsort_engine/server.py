@@ -48,6 +48,22 @@ class Server:
                     raise ValueError("each file needs an id and a state object")
             raw = [{**f["state"], "id": f["id"]} for f in files]
             return {"ok": True, "results": self.sorter.classify(folders, raw) if raw else []}
+        if op == "train_user":
+            from .personalize import personalize
+
+            report = personalize(
+                base=Path(req["base"]), out=Path(req["out"]), tree=req["tree"], examples=req.get("examples") or [],
+                current=Path(req["current"]) if req.get("current") else None, steps=req.get("steps"),
+            )
+            return {"ok": True, "report": report}
+        if op == "reset_user":
+            import shutil
+
+            out = Path(req["out"])
+            if out.name != "user":
+                raise ValueError("reset_user only removes a 'user' model directory")
+            shutil.rmtree(out, ignore_errors=True)
+            return {"ok": True}
         if op == "shutdown":
             return {"ok": True, "bye": True}
         raise ValueError(f"unknown op: {op!r}")
