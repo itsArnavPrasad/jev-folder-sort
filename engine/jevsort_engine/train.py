@@ -3,8 +3,9 @@
     uv run python -m jevsort_engine.train --steps 6000 --out checkpoints/base
 
 Each step is one freshly generated folder tree with a batch of files, i.e. the
-exact shape of an app scan. Model selection uses a synthetic validation set;
-the hand-written messy set is only reported, never selected on.
+exact shape of an app scan. Checkpoints are selected on the small hand-written
+dev set (datasets/eval/dev.py) minus half its calibration error; the held-out
+messy set is only reported, never selected on.
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ from pathlib import Path
 import torch
 from open_jev import RLCDLoss
 
+from datasets.eval import dev as dev_set
 from datasets.generate import augment, make_group
 
-from .eval import evaluate, format_report
+from .eval import eval_cases, evaluate, format_report
 from .model import FileSorter, build_choice, build_model, pick_device, save_checkpoint
 from .state import model_state, parse_tree
 
@@ -57,20 +59,21 @@ def val_score(model, val_groups) -> float:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--steps", type=int, default=6000)
+    p.add_argument("--steps", type=int, default=8000)
     p.add_argument("--files", type=int, default=16, help="files per tree (batch size)")
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--warmup", type=int, default=300)
     p.add_argument("--eval-every", type=int, default=500)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=Path, default=Path("checkpoints/base"))
-    p.add_argument("--version", default="base-0.1.0")
+    p.add_argument("--version", default="base-0.2.0")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     val_rng = random.Random(10_000 + args.seed)
     val_groups = [make_group(val_rng, args.files) for _ in range(40)]
+    dev_cases = eval_cases(dev_set)
 
     device = pick_device()
     model = build_model().to(device).train()
@@ -79,7 +82,7 @@ def main() -> None:
 
     trainable = [p for p in model.parameters() if p.requires_grad]
     print(f"trainable: {sum(p.numel() for p in trainable) / 1e6:.1f}M", flush=True)
-    opt = torch.optim.AdamW([{"params": trainable, "lr": args.lr}], weight_decay=0.01)
+    opt = torch.optim.AdamW([{"params": trainable, "lr": args.lr}], weight_decay=0.05)
     base_lrs = [g["lr"] for g in opt.param_groups]
     loss_fn = RLCDLoss()
 
@@ -105,10 +108,15 @@ def main() -> None:
             print(f"step {step}/{args.steps} loss {running:.4f} ({rate:.1f} it/s)", flush=True)
         if step % args.eval_every == 0 or step == args.steps:
             acc = val_score(model, val_groups)
-            print(f"  val top-1 {acc:.1%}", flush=True)
-            meta = {"version": args.version, "step": step, "val_top1": acc, "params": n_params}
-            if acc > best:
-                best = acc
+            model.eval()
+            dev = evaluate(FileSorter(model), dev_cases)
+            model.train()
+            score = dev["top1"] - 0.5 * dev["ece"]
+            print(f"  val top-1 {acc:.1%} | dev top-1 {dev['top1']:.1%} ECE {dev['ece']:.3f} score {score:.3f}", flush=True)
+            meta = {"version": args.version, "step": step, "val_top1": acc, "dev_top1": dev["top1"],
+                    "dev_ece": dev["ece"], "params": n_params}
+            if score > best:
+                best = score
                 save_checkpoint(model, args.out, meta)
                 print(f"  saved {args.out} (best so far)", flush=True)
 

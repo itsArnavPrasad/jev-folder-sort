@@ -20,7 +20,7 @@ from pathlib import Path
 
 from jevsort_engine.state import NONE_ID
 
-from .ontology import CONCEPTS, FILLERS, GROUPS, Concept
+from .ontology import CONCEPTS, FILLERS, GENERIC, GROUPS, JUNK, OPAQUE_NAMES, Concept
 
 BY_KEY = {c.key: c for c in CONCEPTS}
 BY_GROUP: dict[str, list[Concept]] = {}
@@ -113,10 +113,35 @@ class Node:
     description: str
     concept: str | None  # leaf concept this folder is for
     group: str | None  # group this folder stands for
+    bucket: frozenset = frozenset()  # concepts a generic folder ("Documents") accepts
+
+
+def make_generic_tree(rng: random.Random, opaque: bool) -> list[Node]:
+    """A few catch-all folders ("Documents", "Media"), or opaque names whose
+    only meaning is in the description — teaches the model to read descriptions."""
+    keys = rng.sample(list(GENERIC), k=rng.randint(3, len(GENERIC)))
+    names = rng.sample(OPAQUE_NAMES, k=len(keys))
+    nodes = []
+    for key, opaque_name in zip(keys, names):
+        folder_names, descriptions, concepts = GENERIC[key]
+        path = opaque_name if opaque else rng.choice(folder_names)
+        desc = rng.choice(descriptions) if opaque or rng.random() < 0.7 else ""
+        nodes.append(Node("", path, desc, None, None, frozenset(concepts)))
+    if not opaque and rng.random() < 0.5:  # sometimes a specific leaf under a bucket
+        parent = rng.choice(nodes)
+        c = BY_KEY[rng.choice(sorted(parent.bucket))]
+        nodes.append(Node("", f"{parent.path}/{rng.choice(c.names)}", rng.choice(c.descriptions) if rng.random() < 0.4 else "", c.key, None))
+    return nodes
 
 
 def make_tree(rng: random.Random) -> list[Node]:
-    style = rng.choices(["grouped", "flat", "deep", "mixed"], weights=[5, 2, 2, 3])[0]
+    style = rng.choices(["grouped", "flat", "deep", "mixed", "generic", "opaque"], weights=[5, 2, 2, 3, 3, 2])[0]
+    if style in ("generic", "opaque"):
+        nodes = make_generic_tree(rng, opaque=style == "opaque")
+        rng.shuffle(nodes)
+        for i, n in enumerate(nodes):
+            n.id = f"f{i + 1}"
+        return nodes
     groups = rng.sample(list(GROUPS), k=rng.randint(2, 7) if style != "flat" else rng.randint(3, 8))
     nodes: list[Node] = []
 
@@ -180,6 +205,13 @@ def make_tree(rng: random.Random) -> list[Node]:
 
 
 def target_for(concept: Concept, tree: list[Node]) -> dict[str, float]:
+    if concept.key == JUNK.key:
+        return {NONE_ID: 1.0}
+    buckets = [n for n in tree if concept.key in n.bucket]
+    if buckets:
+        leaf = next((n for n in tree if n.concept == concept.key), None)
+        t = {leaf.id: 0.8, buckets[0].id: 0.2} if leaf else {buckets[0].id: 0.95, NONE_ID: 0.05}
+        return t
     leaf = next((n for n in tree if n.concept == concept.key), None)
     group = next((n for n in tree if n.group == concept.group and n.concept is None), None)
     related = [n for n in tree if n.concept in concept.related]
@@ -214,7 +246,7 @@ def make_file(concept: Concept, rng: random.Random) -> dict:
         name = rng.choice(BLAND_NAMES)  # only the content tells you what it is
     if text and rng.random() < 0.3:
         text = text[: rng.randint(30, max(31, len(text)))]
-    raw = {"name": f"{name}.{ext}", "ext": ext}
+    raw = {"name": f"{name}.{ext}" if ext else name, "ext": ext}
     if rng.random() < 0.85:
         raw["kind"] = KINDS.get(ext, "Document")
     if concept.domains and rng.random() < 0.4:
@@ -234,10 +266,17 @@ def make_group(rng: random.Random, n_files: int = 16) -> dict:
     tree = make_tree(rng)
     in_tree = [BY_KEY[n.concept] for n in tree if n.concept]
     groups_in_tree = {n.group for n in tree if n.group}
-    in_tree += [c for c in CONCEPTS if c.group in groups_in_tree and c not in in_tree]
+    bucketed = set().union(*(n.bucket for n in tree))
+    in_tree += [c for c in CONCEPTS if (c.group in groups_in_tree or c.key in bucketed) and c not in in_tree]
     files = []
     for _ in range(n_files):
-        c = rng.choice(in_tree) if in_tree and rng.random() < 0.8 else rng.choice(CONCEPTS)
+        roll = rng.random()
+        if roll < 0.07:
+            c = JUNK
+        elif in_tree and roll < 0.82:
+            c = rng.choice(in_tree)
+        else:
+            c = rng.choice(CONCEPTS)
         files.append({"state": make_file(c, rng), "target": target_for(c, tree), "concept": c.key})
     return {"tree": [{"id": n.id, "path": n.path, "description": n.description} for n in tree], "files": files}
 

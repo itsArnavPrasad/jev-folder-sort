@@ -209,7 +209,7 @@ CONCEPTS: list[Concept] = [
        "Contents. Preface. Part One. {book}."],
       ["gutenberg.org", "humblebundle.com", "oreilly.com"], ["paper"]),
     # ---------------- media
-    C("photo", "media", ["Photos", "Pictures", "Camera", "Photo Library", "Family Photos"],
+    C("photo", "media", ["Photos", "Pictures", "Camera", "Photo Library", "Family Photos", "Camera Roll", "Camera Uploads", "iPhone Photos"],
       ["camera photos"],
       ["jpg", "jpg", "heic", "heic", "png", "dng"],
       ["IMG_{n4}", "DSC{n4}", "PXL_{date8}_{n}", "photo_{date}", "{city} {year}"],
@@ -374,3 +374,37 @@ FILLERS: dict[str, list[str]] = {
     "misc": ["NEC", "MISC", "INT", "DIV", "B"],
     "month": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December", "Jan", "Mar", "Sep", "Dec"],
 }
+
+
+# Generic catch-all folders people actually have ("Documents", "Media"). Each
+# accepts many concepts; the description usually says which.
+GENERIC: dict[str, tuple[list[str], list[str], set[str]]] = {
+    "documents": (["Documents", "Docs", "Paperwork", "Files", "PDFs"],
+                  ["work and personal documents, notes, PDFs to read", "letters, reports, notes and reading", "documents of any kind"],
+                  {"report", "meeting", "contract", "resume", "paper", "ebook", "housing", "presentation", "lecture", "assignment", "exam", "visa", "id", "insurance", "medical"}),
+    "money": (["Money", "Finance", "Finances", "Bills"],
+              ["bills, taxes, banks, anything with prices", "anything about money: receipts, invoices, statements, taxes"],
+              {"tax", "bank", "receipt", "invoice", "payslip", "investment"}),
+    "images": (["Images", "Pictures", "Graphics", "Visuals"],
+               ["photos, screenshots, graphics", "any image: photos, screenshots, logos, memes"],
+               {"photo", "screenshot", "meme", "wallpaper", "design", "logo"}),
+    "media": (["Media", "Audio & Video", "Videos & Music", "Entertainment"],
+              ["music, videos, podcasts", "audio and video files"],
+              {"video", "music", "voice"}),
+    "dev": (["Dev", "Tech", "Coding", "Nerd Stuff"],
+            ["code, scripts, datasets, configs", "programming files and data"],
+            {"code", "dataset", "config", "notebook"}),
+    "apps": (["Apps", "Installers", "Software", "To Install"],
+             ["installers and disk images", "apps and archives to install"],
+             {"installer", "archive", "font"}),
+}
+
+# Folder names that say nothing; only the description tells you what goes there.
+OPAQUE_NAMES = ["Box A", "Box B", "Folder 1", "Folder 2", "Folder 3", "Stuff", "Misc 2", "Area 51", "Blue", "Green",
+                "Project Kiwi", "Archive X", "Drawer", "Shelf", "Mom", "Keep", "Later", "Z", "Bin 7", "Old Mac"]
+
+# Files that belong nowhere: the right answer is "none of these".
+JUNK = Concept("junk", "", [], [], ["bin", "dat", "tmp", "ics", "txt", "log", "dmp", "cache", ""],
+               ["Unknown", "data", "file", "untitled", "core", "~$temp", "asdf", "output", "blob_{n}", "invite", "{n}"],
+               ["asdf test test 123", "BEGIN:VCALENDAR BEGIN:VEVENT SUMMARY:Call", "lorem ipsum", "xxxxxxxx", "0x00 0x00 0x1f",
+                "hello world", "test"])

@@ -1,0 +1,87 @@
+"""Hand-written dev set used ONLY for checkpoint selection during training.
+
+Separate from messy.py (the held-out eval, never selected on). Same format.
+"""
+
+from __future__ import annotations
+
+TREES: dict[str, list[tuple[str, str]]] = {
+    "family": [
+        ("Household", "bills, utilities, insurance, the car"), ("Household/Taxes", ""),
+        ("Kids", "school letters, report cards, medical for the kids"),
+        ("Photos", ""), ("Photos/Screenshots", ""), ("Recipes", "cooking and recipes"),
+        ("Work", ""), ("Work/Payslips", ""), ("Software", ""),
+    ],
+    "researcher": [
+        ("Papers", "research papers to read"), ("Drafts", "my own writing in progress"),
+        ("Data", "datasets and experiment results"), ("Code", ""), ("Admin", "grants, travel reimbursement, HR"),
+        ("Talks", "slides for talks and posters"), ("Personal", ""),
+    ],
+}
+
+FILES: dict[str, list[tuple[str, str, str, list[str]]]] = {
+    "family": [
+        ("PGE_bill_march.pdf", "PG&E Energy Statement. Amount due $142.18. Service address.", "", ["Household"]),
+        ("car_insurance_renewal_2026.pdf", "Your auto policy renewal. Premium $1,020 for 12 months.", "", ["Household"]),
+        ("1040_2025_draft.pdf", "Form 1040 U.S. Individual Income Tax Return 2025.", "", ["Household/Taxes"]),
+        ("property_tax_notice.pdf", "Secured property tax bill 2025-26. First installment due Nov 1.", "", ["Household/Taxes", "Household"]),
+        ("report_card_term2.pdf", "Lincoln Elementary. Progress report. Reading: meets standard.", "", ["Kids"]),
+        ("field_trip_permission.docx", "Permission slip for the aquarium field trip on Friday.", "", ["Kids"]),
+        ("IMG_7781.HEIC", "", "", ["Photos"]),
+        ("IMG_7782.HEIC", "", "", ["Photos"]),
+        ("Screenshot 2026-01-04 at 8.01.12 PM.png", "", "", ["Photos/Screenshots"]),
+        ("banana_bread.txt", "3 ripe bananas, 1/3 cup melted butter, 1 tsp baking soda. Bake 60 minutes at 350F.", "", ["Recipes"]),
+        ("NYT Cooking - Chicken Tikka.pdf", "Ingredients: chicken thighs, yogurt, garam masala. Instructions.", "https://cooking.nytimes.com", ["Recipes"]),
+        ("paystub_2026_01_15.pdf", "Earnings statement. Regular pay. Net pay $3,211.40.", "", ["Work/Payslips"]),
+        ("Q1 planning.pptx", "Q1 planning. Goals. Headcount. Budget.", "", ["Work"]),
+        ("Zoom.pkg", "", "https://zoom.us/client/latest", ["Software"]),
+        ("TurboTax.dmg", "", "", ["Software", "Household/Taxes"]),
+        ("pediatrician_visit_summary.pdf", "Well-child visit. Height, weight. Next visit in 6 months.", "", ["Kids"]),
+        ("water_bill.pdf", "City water utility. Usage 6 CCF. Amount due $61.00.", "", ["Household"]),
+        ("mystery.dat", "", "", ["NONE"]),
+        ("wedding_invite.ics", "BEGIN:VCALENDAR BEGIN:VEVENT SUMMARY:Sam & Ana wedding", "", ["NONE"]),
+        ("IMG_0091.MOV", "", "", ["Photos"]),
+        ("W-2_2025_employer.pdf", "Form W-2 Wage and Tax Statement 2025.", "", ["Household/Taxes", "Work/Payslips"]),
+        ("offsite_agenda.docx", "Team offsite agenda. Day 1: strategy.", "", ["Work"]),
+        ("Firefox 140.dmg", "", "https://download.mozilla.org", ["Software"]),
+        ("lasagna.md", "Layer noodles, ricotta, sauce. Bake 45 minutes.", "", ["Recipes"]),
+        ("school_lunch_menu.pdf", "October lunch menu. Monday: pasta.", "", ["Kids"]),
+        ("home_warranty.pdf", "Home warranty contract. Covered systems: HVAC, plumbing.", "", ["Household"]),
+        ("PXL_20260102_101010.jpg", "", "", ["Photos"]),
+        ("scan0003.pdf", "Explanation of Benefits. Patient: Mia. Amount you owe $20.", "", ["Kids", "Household"]),
+        ("tmp_8812", "", "", ["NONE"]),
+        ("Slack-4.41.dmg", "", "", ["Software"]),
+    ],
+    "researcher": [
+        ("2403.11122.pdf", "Abstract. We study scaling laws for sparse mixture-of-experts models.", "https://arxiv.org/abs/2403.11122", ["Papers"]),
+        ("smith2024_contrastive.pdf", "Contrastive learning of visual representations. 1 Introduction.", "", ["Papers"]),
+        ("draft_v3_intro.docx", "1 Introduction. In this paper we argue that", "", ["Drafts"]),
+        ("thesis_chapter2.tex", "\\chapter{Related Work} \\section{Graph methods}", "", ["Drafts"]),
+        ("results_run42.csv", "epoch,loss,acc\n1,2.3,0.12\n2,1.9,0.31", "", ["Data"]),
+        ("survey_responses.xlsx", "respondent,age,answer_q1", "", ["Data"]),
+        ("train.py", "import torch\nfrom torch.utils.data import DataLoader", "", ["Code"]),
+        ("plot_figures.ipynb", '{"cells": [{"source": ["import matplotlib.pyplot as plt"]}]}', "", ["Code", "Data"]),
+        ("travel_reimbursement_form.pdf", "Travel expense reimbursement. Conference registration $450.", "", ["Admin"]),
+        ("grant_budget_NSF.xlsx", "Personnel, Equipment, Travel, Indirect costs", "", ["Admin"]),
+        ("NeurIPS_poster.pdf", "Poster. Method. Results. Contact.", "", ["Talks"]),
+        ("lab_meeting_slides.key", "Lab meeting. Update on experiments.", "", ["Talks"]),
+        ("IMG_2202.JPG", "", "", ["Personal"]),
+        ("gym_schedule.pdf", "Class schedule. Yoga Tuesdays 7am.", "", ["Personal"]),
+        ("reviewer_comments.txt", "Reviewer 2: the ablation in Table 3 is missing.", "", ["Drafts", "Papers"]),
+        ("hf_dataset_card.md", "Dataset card. License: CC-BY. Size: 12k examples.", "https://huggingface.co", ["Data"]),
+        ("config.yaml", "model:\n  hidden: 512\n  layers: 6", "", ["Code"]),
+        ("offer_postdoc.pdf", "Offer of appointment. Postdoctoral researcher. Salary.", "", ["Admin", "Personal"]),
+        ("Attention_Is_All_You_Need.pdf", "The dominant sequence transduction models are based on complex recurrent networks.", "", ["Papers"]),
+        ("rebuttal.md", "We thank the reviewers. Regarding the missing ablation", "", ["Drafts"]),
+        ("unknown_file", "", "", ["NONE"]),
+        ("checkpoint_epoch10.pt", "", "", ["Data", "Code"]),
+        ("visa_invitation_letter.pdf", "Invitation letter for conference attendance. Visa purposes.", "", ["Admin"]),
+        ("talk_recording.mp4", "", "", ["Talks"]),
+        ("birthday_dinner.jpg", "", "", ["Personal"]),
+        ("analysis.R", "library(ggplot2)\ndf <- read.csv('data.csv')", "", ["Code"]),
+        ("slides_icml.pdf", "ICML 2026 oral. Slide 1. Motivation.", "", ["Talks"]),
+        ("hr_benefits_enrollment.pdf", "Benefits enrollment. Medical, dental, vision.", "", ["Admin"]),
+        ("scratch.txt", "asdf", "", ["NONE"]),
+        ("dataset_v2.parquet", "", "", ["Data"]),
+    ],
+}

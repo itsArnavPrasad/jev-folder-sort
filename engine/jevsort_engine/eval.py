@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from datasets.eval.messy import FILES, TREES
+from datasets.eval import dev, messy
 from datasets.generate import KINDS
 
 from .baseline import KeywordSorter
@@ -19,7 +19,9 @@ from .state import NONE_ID, Folder
 THRESHOLDS = (0.5, 0.75, 0.9)
 
 
-def eval_cases() -> list[tuple[list[Folder], list[dict], list[set[str]]]]:
+def eval_cases(source=messy) -> list[tuple[list[Folder], list[dict], list[set[str]]]]:
+    """Cases from a hand-written set: `messy` (held-out eval) or `dev` (selection)."""
+    TREES, FILES = source.TREES, source.FILES
     cases = []
     for name, tree in TREES.items():
         folders = [Folder(f"f{i + 1}", path, desc) for i, (path, desc) in enumerate(tree)]
