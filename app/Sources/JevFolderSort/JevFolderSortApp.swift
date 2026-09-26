@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor func showOnboardingIfNeeded(_ model: AppModel) {
         self.model = model
         guard model.needsOnboarding, onboarding == nil else { return }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 720),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Welcome to jev-folder-sort"
         window.isReleasedWhenClosed = false

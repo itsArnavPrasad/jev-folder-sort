@@ -14,3 +14,5 @@ build/
 app/.test-fixtures/
 examples/demo/
 .jevsort-data/
+.jevsort-learn/
+.jevsort-data-ui/

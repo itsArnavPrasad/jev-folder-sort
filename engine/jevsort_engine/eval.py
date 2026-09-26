@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from datasets.eval import dev, messy
+from datasets.eval import dev, messy, plain_english
 from datasets.generate import KINDS
 
 from .baseline import KeywordSorter
@@ -81,13 +81,24 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=Path)
     p.add_argument("--json", type=Path, help="write the report here")
+    p.add_argument("--zero-shot", action="store_true", help="also evaluate untrained MiniLM description matching")
     args = p.parse_args()
-    reports = {"baseline": evaluate(KeywordSorter())}
+    p_sets = {"messy": messy, "plain_english": plain_english}
+    sorters = {"baseline": KeywordSorter()}
     if args.model:
         from .model import FileSorter, load_checkpoint
 
         model, meta = load_checkpoint(args.model)
-        reports[meta.get("version", "model")] = evaluate(FileSorter(model, meta))
+        sorters[meta.get("version", "model")] = FileSorter(model, meta)
+    if args.zero_shot:
+        from .model import FileSorter, build_model
+
+        sorters["minilm-zero-shot"] = FileSorter(build_model(arch="minilm").eval())
+    reports = {}
+    for set_name, source in p_sets.items():
+        cases = eval_cases(source)
+        for name, sorter in sorters.items():
+            reports[f"{name} / {set_name}"] = evaluate(sorter, cases)
     for name, r in reports.items():
         print(format_report(name, r))
     if args.json:

@@ -192,8 +192,21 @@ struct EngineSettingsView: View {
                             : (r.reason ?? "not activated"))
                     }
                 }
+                if let r = model.lastTrainReport, let per = r.perFolder, !per.isEmpty {
+                    DisclosureGroup("Per-folder results on held-out files") {
+                        ForEach(per.keys.sorted(), id: \.self) { k in
+                            LabeledContent(k, value: "\(per[k]!.correct)/\(per[k]!.heldOut) correct · \(r.examplesPerFolder?[k] ?? 0) examples")
+                        }
+                    }
+                    if let t = r.suggestedThreshold, abs(t - model.settings.confidenceThreshold) > 0.001 {
+                        Button("Use suggested threshold \(pct(t))") { model.applySuggestedThreshold() }
+                    }
+                }
                 HStack {
-                    Button(model.isTraining ? "Training…" : "Retrain now") { model.retrainNow() }
+                    Button(model.isTraining ? "Training…" : "Learn from my folders") { model.learnFromMyFolders() }
+                        .disabled(model.isTraining || !model.issues.isEmpty)
+                        .help("Reads up to 100 files already in each allowed folder (read-only) and fine-tunes on them.")
+                    Button("Retrain now") { model.retrainNow() }
                         .disabled(model.isTraining || !model.issues.isEmpty)
                     Button("Forget personalisation", role: .destructive) { model.resetLearning() }
                         .disabled(model.isTraining || model.learning?.personalised != true)

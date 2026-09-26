@@ -27,6 +27,9 @@ M0–M1 carry the most risk (does a small local open-jev sort well enough?), so 
 
 Deliberately deferred from v1:
 
+- **System Two fallback.** For files the fast model is unsure about (the Review queue), optionally ask a small local generative model (e.g. a 0.5–1.5B model via MLX) with constrained output over the allowed folders. It could also act as an offline *teacher* to distill into the fast model. The fast System One path stays the default.
+- **Bigger or multilingual encoder** (e5/bge small or base, 30–110M) as a drop-in for MiniLM.
+
 - **Create new folders.** Let the model propose a new sub-folder when nothing fits well (with user approval).
 - **Rename files.** Suggest clean, consistent names (e.g. `2025-03 Acme Invoice.pdf`).
 - **Core ML inference.** Export the trained model to Core ML to drop PyTorch from the default install and shrink the DMG; keep PyTorch only for fine-tuning.

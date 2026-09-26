@@ -37,3 +37,15 @@ def test_learns_users_mapping_and_activates(tmp_path):
     assert r["activated"] and (tmp_path / "user" / "model.safetensors").exists()
     _, meta = load_checkpoint(tmp_path / "user", torch.device("cpu"))
     assert meta["personalized_from"] == "base-test" and "+user." in meta["version"]
+
+
+def test_report_has_per_folder_and_threshold(tmp_path):
+    from jevsort_engine.personalize import suggest_threshold
+
+    base = base_ckpt(tmp_path)
+    r = personalize(base, tmp_path / "user", TREE, examples(30), steps=60, replay=False, unfreeze_top=1)
+    assert set(r["per_folder"]) <= {"Alpha", "Beta"} and r["unfrozen_layers"] == 1
+    assert sum(v["held_out"] for v in r["per_folder"].values()) == r["holdout"]
+    assert r["examples_per_folder"] == {"Alpha": 15, "Beta": 15}
+    assert suggest_threshold([("a", 0.99, "a")] * 9 + [("b", 0.6, "a")]) == 0.65
+    assert suggest_threshold([("a", 0.99, "b")] * 10) is None

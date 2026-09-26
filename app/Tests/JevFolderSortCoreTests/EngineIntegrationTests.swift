@@ -62,7 +62,8 @@ struct EngineIntegrationTests {
         let learner = Learner(db: db, policy: fx.policy, launch: launch)
         let report = try await learner.train(steps: 40)
         #expect(report.examples == 16)
-        #expect(report.holdout == 3)
+        #expect(report.holdout == 2)  // 1 of 8 per folder
+        #expect(report.perFolder?.keys.sorted() == ["Recipes", "Rockets"])
         #expect(try learner.status().lastReport == report)
         if report.activated {
             #expect(FileManager.default.fileExists(atPath: models + "/user/model.safetensors"))

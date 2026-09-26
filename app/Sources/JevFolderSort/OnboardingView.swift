@@ -41,6 +41,13 @@ struct OnboardingView: View {
                 SettingsLink { Text("Open Scope…") }
             }
 
+            step(4, "Describe your folders, then let it learn (optional)", done: model.learning?.personalised == true,
+                 detail: model.isTraining ? "Learning from your folders…" : "",
+                 hint: "In Structure, say in plain English what goes in each folder. If your folders already contain files, it can learn from them (read-only, ~1–3 min).") {
+                Button(model.isTraining ? "Learning…" : "Learn from my folders") { model.learnFromMyFolders() }
+                    .disabled(model.isTraining || !model.issues.isEmpty)
+            }
+
             GroupBox {
                 Toggle(isOn: Binding(get: { model.settings.previewMode }, set: { v in
                     var s = model.settings
@@ -71,7 +78,7 @@ struct OnboardingView: View {
             }
         }
         .padding(24)
-        .frame(width: 560)
+        .frame(width: 600)
     }
 
     private func step<A: View>(_ n: Int, _ title: String, done: Bool, detail: String, hint: String,

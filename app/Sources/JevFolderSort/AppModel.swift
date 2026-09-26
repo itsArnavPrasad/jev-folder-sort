@@ -274,6 +274,21 @@ final class AppModel: ObservableObject {
         Task { await train(force: true) }
     }
 
+    /// "Learn from my folders": read up to 100 files per allowed folder
+    /// (read-only), fine-tune, and offer the suggested threshold.
+    func learnFromMyFolders() {
+        Task { await train(force: true, perFolder: 100) }
+    }
+
+    @Published var lastTrainReport: TrainReport?
+
+    func applySuggestedThreshold() {
+        guard let t = lastTrainReport?.suggestedThreshold else { return }
+        var s = settings
+        s.confidenceThreshold = t
+        save(s)
+    }
+
     private func maybeTrain() async {
         guard !isTraining, let launch = try? engineLaunch(),
               (try? Learner(db: db, policy: policy, launch: launch).shouldTrainAutomatically()) == true
@@ -281,19 +296,24 @@ final class AppModel: ObservableObject {
         await train(force: false)
     }
 
-    private func train(force: Bool) async {
+    private func train(force: Bool, perFolder: Int? = nil) async {
         guard !isTraining else { return }
         guard issues.isEmpty else { alert = "Set up your scope first."; return }
         isTraining = true
         defer { isTraining = false; refresh() }
         do {
             let learner = Learner(db: db, policy: policy, launch: try engineLaunch())
-            let report = try await learner.train()
+            let report = try await learner.train(learnFromFolders: perFolder)
+            lastTrainReport = report
             if report.activated { restartEngine() }
             if force {
-                alert = report.activated
-                    ? "Personalised model is now active (held-out accuracy \(pct(report.newAccuracy)) vs \(pct(report.currentAccuracy)))."
+                var msg = report.activated
+                    ? "Personalised model is now active. On your held-out files: \(pct(report.newAccuracy)) correct (was \(pct(report.currentAccuracy)))."
                     : "Kept the current model: \(report.reason ?? "no improvement")."
+                if report.activated, let t = report.suggestedThreshold, abs(t - settings.confidenceThreshold) > 0.001 {
+                    msg += "\n\nSuggested confidence threshold: \(pct(t)) (stays ≥95% precise on your held-out files). Apply it in Settings → Model."
+                }
+                alert = msg
             }
         } catch {
             if force { alert = "Training failed: \(error)" }

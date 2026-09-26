@@ -54,6 +54,7 @@ class Server:
             report = personalize(
                 base=Path(req["base"]), out=Path(req["out"]), tree=req["tree"], examples=req.get("examples") or [],
                 current=Path(req["current"]) if req.get("current") else None, steps=req.get("steps"),
+                unfreeze_top=req.get("unfreeze_top"),
             )
             return {"ok": True, "report": report}
         if op == "reset_user":

@@ -129,10 +129,22 @@ public struct TrainReport: Codable, Equatable, Sendable {
     public var steps: Int?
     public var seconds: Double?
     public var version: String?
+    public var unfrozenLayers: Int?
+    public var suggestedThreshold: Double?
+    public var perFolder: [String: FolderScore]?
+    public var examplesPerFolder: [String: Int]?
+
+    public struct FolderScore: Codable, Equatable, Sendable {
+        public var heldOut: Int
+        public var correct: Int
+        enum CodingKeys: String, CodingKey { case heldOut = "held_out", correct }
+    }
 
     enum CodingKeys: String, CodingKey {
         case examples, dropped, activated, reason, holdout, steps, seconds, version
         case newAccuracy = "new_accuracy", currentAccuracy = "current_accuracy"
+        case unfrozenLayers = "unfrozen_layers", suggestedThreshold = "suggested_threshold"
+        case perFolder = "per_folder", examplesPerFolder = "examples_per_folder"
     }
 }
 

@@ -37,11 +37,48 @@ def _soft_target(ids: list[str], target: str) -> list[float]:
     return [v / total for v in t]
 
 
-def _accuracy(sorter: FileSorter, folders: list[Folder], items: list[dict]) -> float:
+def _predictions(sorter: FileSorter, folders: list[Folder], items: list[dict]) -> list[tuple[str, float, str]]:
+    """(predicted id, confidence, target id) per item."""
     if not items:
-        return 0.0
+        return []
     dists = sorter.distributions(folders, [e["state"] for e in items])
-    return sum(max(d, key=d.get) == e["target"] for d, e in zip(dists, items)) / len(items)
+    return [(max(d, key=d.get), max(d.values()), e["target"]) for d, e in zip(dists, items)]
+
+
+def _accuracy(preds: list[tuple[str, float, str]]) -> float:
+    return sum(p == t for p, _, t in preds) / len(preds) if preds else 0.0
+
+
+def suggest_threshold(preds: list[tuple[str, float, str]], target_precision: float = 0.95) -> float | None:
+    """Lowest confidence threshold whose auto-moves are >= target_precision on held-out examples.
+
+    None when there are too few held-out examples (< 10) for the estimate to mean anything.
+    """
+    if len(preds) < 10:
+        return None
+    for t in (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95):
+        moved = [(p, t_) for p, c, t_ in preds if c >= t and p != NONE_ID]
+        if len(moved) >= max(3, len(preds) // 5) and sum(p == t_ for p, t_ in moved) / len(moved) >= target_precision:
+            return t
+    return None
+
+
+def _split(items: list[dict], rng: random.Random) -> tuple[list[dict], list[dict]]:
+    """Hold out ~20% per folder (folders with a single example stay in training)."""
+    by: dict[str, list[dict]] = {}
+    for e in items:
+        by.setdefault(e["target"], []).append(e)
+    hold, train = [], []
+    for group in by.values():
+        rng.shuffle(group)
+        k = max(1, len(group) // 5) if len(group) >= 2 else 0
+        hold += group[:k]
+        train += group[k:]
+    if len(hold) < 2:  # tiny sets: fall back to a plain split
+        rng.shuffle(items)
+        n = max(2, len(items) // 5)
+        return items[n:], items[:n]
+    return train, hold
 
 
 def personalize(
@@ -53,6 +90,7 @@ def personalize(
     steps: int | None = None,
     seed: int = 0,
     replay: bool = True,
+    unfreeze_top: int | None = None,
 ) -> dict:
     start = time.perf_counter()
     folders = parse_tree(tree)
@@ -65,19 +103,31 @@ def personalize(
 
     rng = random.Random(seed)
     torch.manual_seed(seed)
-    rng.shuffle(usable)
-    n_hold = max(2, len(usable) // 5)
-    holdout, train = usable[:n_hold], usable[n_hold:]
+    train, holdout = _split(list(usable), rng)
 
     model, meta = load_checkpoint(base, torch.device("cpu"))
     for module in (model.state_encoder, model.text_encoder):
         for p in module.parameters():
             p.requires_grad_(False)
-    trainable = [p for p in model.parameters() if p.requires_grad]
-    opt = torch.optim.AdamW(trainable, lr=1e-4, weight_decay=0.01)
+    # With enough examples, also adapt the top MiniLM layers to the user's
+    # vocabulary (e.g. their clients' names), gently.
+    if unfreeze_top is None:
+        unfreeze_top = 2 if len(train) >= 40 else 0
+    encoder_params: list[torch.nn.Parameter] = []
+    bert = getattr(model, "bert", None)
+    if bert is not None and unfreeze_top > 0:
+        for layer in bert.layers[-unfreeze_top:]:
+            for p in layer.parameters():
+                p.requires_grad_(True)
+                encoder_params.append(p)
+    enc_ids = {id(p) for p in encoder_params}
+    head_params = [p for p in model.parameters() if p.requires_grad and id(p) not in enc_ids]
+    trainable = head_params + encoder_params
+    opt = torch.optim.AdamW([{"params": head_params, "lr": 1e-4},
+                             {"params": encoder_params, "lr": 1e-5}], weight_decay=0.01)
     loss_fn = RLCDLoss(w_consistency=0.0)
     question, option_ids = build_choice(folders)
-    steps = steps or min(400, max(100, 20 * len(train)))
+    steps = steps or min(600, max(100, 20 * len(train)))
 
     if replay:
         from datasets.generate import make_group
@@ -102,13 +152,23 @@ def personalize(
         opt.step()
     model.eval()
 
-    new_acc = _accuracy(FileSorter(model), folders, holdout)
+    new_preds = _predictions(FileSorter(model), folders, holdout)
     reference = current if current and (current / "model.safetensors").exists() else base
     ref_model, _ = load_checkpoint(reference, torch.device("cpu"))
-    cur_acc = _accuracy(FileSorter(ref_model), folders, holdout)
+    cur_preds = _predictions(FileSorter(ref_model), folders, holdout)
+    new_acc, cur_acc = _accuracy(new_preds), _accuracy(cur_preds)
+    names = {f.id: f.path for f in folders}
+    per_folder = {}
+    for fid in sorted({t for _, _, t in new_preds}):
+        rows = [(p, t) for p, _, t in new_preds if t == fid]
+        per_folder[names.get(fid, fid)] = {"held_out": len(rows), "correct": sum(p == t for p, t in rows)}
+    counts: dict[str, int] = {}
+    for e in usable:
+        counts[names.get(e["target"], e["target"])] = counts.get(names.get(e["target"], e["target"]), 0) + 1
     report.update(
         holdout=len(holdout), new_accuracy=round(new_acc, 4), current_accuracy=round(cur_acc, 4),
-        steps=steps, seconds=round(time.perf_counter() - start, 1),
+        steps=steps, seconds=round(time.perf_counter() - start, 1), unfrozen_layers=unfreeze_top,
+        suggested_threshold=suggest_threshold(new_preds), per_folder=per_folder, examples_per_folder=counts,
     )
     if new_acc < cur_acc:
         report["reason"] = "new model was worse on your held-out examples; kept the current one"

@@ -44,10 +44,16 @@ public struct Learner: Sendable {
     }
 
     /// Bootstrap (first time), then fine-tune. Returns the engine's report.
-    public func train(steps: Int? = nil) async throws -> TrainReport {
+    ///
+    /// `learnFromFolders: n` re-reads up to `n` files per allowed folder first
+    /// — the "Learn from my folders" pipeline for a brand-new user whose
+    /// folders are already organised.
+    public func train(steps: Int? = nil, learnFromFolders perFolder: Int? = nil) async throws -> TrainReport {
         let settings = try db.settings()
         let collector = LearningCollector(db: db, policy: policy)
-        if (try db.exampleCounts()["bootstrap"] ?? 0) == 0 {
+        if let perFolder {
+            try collector.bootstrap(textLimitKB: settings.textLimitKB, perFolder: perFolder)
+        } else if (try db.exampleCounts()["bootstrap"] ?? 0) == 0 {
             try collector.bootstrap(textLimitKB: settings.textLimitKB)
         }
         let scope = try db.scope()

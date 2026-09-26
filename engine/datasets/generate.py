@@ -116,9 +116,28 @@ class Node:
     bucket: frozenset = frozenset()  # concepts a generic folder ("Documents") accepts
 
 
+DESCRIPTION_TEMPLATES = [
+    "{d}", "{d}", "all my {n}", "anything about {n}", "{n} and similar", "put {n} here", "{n}, {m}",
+    "files like {n}", "{d} — nothing else", "for {n}", "everything related to {n} ({m})",
+]
+
+
+def describe(concept: Concept, rng: random.Random) -> str:
+    """A plain-English folder description, in many phrasings, so the model
+    learns to follow descriptions rather than memorise a few fixed strings."""
+    names = [n.lower() for n in concept.names] or [concept.key]
+    return rng.choice(DESCRIPTION_TEMPLATES).format(
+        d=rng.choice(concept.descriptions), n=rng.choice(names), m=rng.choice(names))
+
+
 def make_generic_tree(rng: random.Random, opaque: bool) -> list[Node]:
     """A few catch-all folders ("Documents", "Media"), or opaque names whose
     only meaning is in the description — teaches the model to read descriptions."""
+    if opaque and rng.random() < 0.5:
+        # Concept-level folders with meaningless names, described in plain English.
+        picks = rng.sample(CONCEPTS, k=rng.randint(4, 10))
+        return [Node("", name, describe(c, rng), c.key, None)
+                for name, c in zip(rng.sample(OPAQUE_NAMES, k=len(picks)), picks)]
     keys = rng.sample(list(GENERIC), k=rng.randint(3, len(GENERIC)))
     names = rng.sample(OPAQUE_NAMES, k=len(keys))
     nodes = []
@@ -147,8 +166,8 @@ def make_tree(rng: random.Random) -> list[Node]:
 
     def add(path: str, concept: str | None, group: str | None) -> None:
         desc = ""
-        if concept and rng.random() < 0.45:
-            desc = rng.choice(BY_KEY[concept].descriptions)
+        if concept and rng.random() < 0.55:
+            desc = describe(BY_KEY[concept], rng)
         elif group and not concept and rng.random() < 0.2:
             desc = " , ".join(c.names[0].lower() for c in rng.sample(BY_GROUP[group], k=min(3, len(BY_GROUP[group]))))
         nodes.append(Node("", path, desc, concept, group))

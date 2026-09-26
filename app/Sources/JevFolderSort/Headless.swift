@@ -5,6 +5,7 @@ import JevFolderSortCore
 ///
 ///   JEVSORT_DATA_DIR=<dir> JevFolderSort --headless [--demo <demoDir>] [--stub] [--preview]
 ///                                      [--sort] [--train] [--undo-last-run]
+///                                      [--learn-from <root> [--per-folder N] [--apply-threshold]]
 ///
 /// `--demo` points the scope at <demoDir>/Inbox and <demoDir>/Sorted (all
 /// sub-folders allowed). Requires JEVSORT_DATA_DIR so it never touches the
@@ -58,6 +59,17 @@ enum Headless {
             scope.folders = FolderImport.folders(under: root, merging: scope.folders)
             try db.save(scope)
         }
+        if let root = value(after: "--learn-from", in: args) {
+            // Learn-only scope: every sub-folder of <root> is a label. Nothing is
+            // watched in a way that matters because this mode never sorts.
+            let croot = try require(ScopePaths.canonical(root), "\(root) doesn't exist")
+            var scope = try db.scope()
+            if scope.root != croot { scope.folders = [] }
+            scope.root = croot
+            if scope.sources.isEmpty { scope.sources = [croot] }
+            scope.folders = FolderImport.folders(under: croot, merging: scope.folders)
+            try db.save(scope)
+        }
         let scope = try db.scope()
         var out: [String: Any] = ["scope_issues": scope.issues(policy: policy).map(\.message),
                                   "scope_summary": scope.summary()]
@@ -85,9 +97,17 @@ enum Headless {
             let r = try Actions(db: db, policy: policy).undo(runID: last)
             out["undo"] = ["undone": r.undone, "failed": r.failed]
         }
-        if args.contains("--train") {
-            let report = try await Learner(db: db, policy: policy, launch: launch).train()
+        if args.contains("--train") || args.contains("--learn-from") {
+            let perFolder = args.contains("--learn-from") ? Int(value(after: "--per-folder", in: args) ?? "") ?? 100 : nil
+            let report = try await Learner(db: db, policy: policy, launch: launch).train(learnFromFolders: perFolder)
             out["train"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(report))
+            if args.contains("--apply-threshold"), report.activated, let t = report.suggestedThreshold {
+                var s = try db.settings()
+                s.confidenceThreshold = t
+                try db.save(s)
+                out["threshold_applied"] = t
+            }
+            out["user_model"] = launch.activeCheckpoint as Any
         }
         return out
     }

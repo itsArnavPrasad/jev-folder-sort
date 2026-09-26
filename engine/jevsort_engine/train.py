@@ -59,14 +59,16 @@ def val_score(model, val_groups) -> float:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--steps", type=int, default=8000)
+    p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--files", type=int, default=16, help="files per tree (batch size)")
     p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--encoder-lr", type=float, default=2e-5)
+    p.add_argument("--arch", default="minilm", choices=["minilm", "jev"])
     p.add_argument("--warmup", type=int, default=300)
-    p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--eval-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=Path, default=Path("checkpoints/base"))
-    p.add_argument("--version", default="base-0.2.0")
+    p.add_argument("--version", default="minilm-0.3.0")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -76,17 +78,31 @@ def main() -> None:
     dev_cases = eval_cases(dev_set)
 
     device = pick_device()
-    model = build_model().to(device).train()
+    model = build_model(arch=args.arch).to(device).train()
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model: {n_params / 1e6:.1f}M params on {device}", flush=True)
 
     trainable = [p for p in model.parameters() if p.requires_grad]
     print(f"trainable: {sum(p.numel() for p in trainable) / 1e6:.1f}M", flush=True)
-    opt = torch.optim.AdamW([{"params": trainable, "lr": args.lr}], weight_decay=0.05)
+    # Pretrained MiniLM layers fine-tune gently; the fresh open-jev read-out learns fast.
+    enc_ids = {id(p) for p in getattr(model, "encoder_parameters", lambda: [])()}
+    groups = [{"params": [p for p in trainable if id(p) not in enc_ids], "lr": args.lr}]
+    if enc_ids:
+        groups.append({"params": [p for p in trainable if id(p) in enc_ids], "lr": args.encoder_lr})
+    opt = torch.optim.AdamW(groups, weight_decay=0.05)
     base_lrs = [g["lr"] for g in opt.param_groups]
     loss_fn = RLCDLoss()
 
     best = -1.0
+    # Step 0 is a real candidate: the untrained MiniLM model already matches
+    # descriptions. Training only wins if it beats that on the dev set.
+    model.eval()
+    dev0 = evaluate(FileSorter(model), dev_cases)
+    model.train()
+    best = dev0["top1"] - 0.5 * dev0["ece"]
+    print(f"  step 0 (zero-shot) | dev top-1 {dev0['top1']:.1%} ECE {dev0['ece']:.3f} score {best:.3f}", flush=True)
+    save_checkpoint(model, args.out, {"version": args.version, "step": 0, "dev_top1": dev0["top1"],
+                                      "dev_ece": dev0["ece"], "params": n_params})
     start = time.time()
     running = 0.0
     for step in range(1, args.steps + 1):
