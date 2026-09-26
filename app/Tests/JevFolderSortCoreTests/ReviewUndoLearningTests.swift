@@ -178,3 +178,27 @@ struct LearningTests {
         #expect(try LearningCollector(db: db, policy: fx.policy).detectImplicitCorrections(textLimitKB: 4) == 0)
     }
 }
+
+@Suite("Stats")
+struct StatsTests {
+    @Test func statsReflectRunsUndosAndReview() async throws {
+        let fx = try Fixture()
+        try fx.file("Inbox/a.txt")
+        try fx.file("Inbox/b.txt")
+        try fx.file("Inbox/c.txt")
+        let (db, actions) = try await sorted(fx, ["a.txt": ("f1", 0.99), "b.txt": ("f4", 0.95), "c.txt": ("f1", 0.2)])
+        var s = try db.stats()
+        #expect(s.movedAllTime == 2 && s.movedToday == 2 && s.pending == 1)
+        #expect(s.byReason["model"] == 2)
+        #expect(s.byFolder.map(\.folder).sorted() == ["Code", "Finance"])
+        #expect(s.averageLatencyMs == 1)
+
+        let moved = try #require(try db.history().first { $0.fileName == "b.txt" && $0.status == .moved })
+        _ = try actions.undo(entryID: moved.id!)
+        _ = try actions.file(pendingPath: fx.inbox + "/c.txt", into: "f3", textLimitKB: 4)
+        s = try db.stats()
+        #expect(s.movedAllTime == 2 && s.undone == 1)   // a.txt + c.txt (b.txt undone)
+        #expect(s.byReason["you"] == 1 && s.corrections == 1)
+        #expect(s.pending == 1)                          // b.txt waits in Review after undo
+    }
+}
