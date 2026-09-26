@@ -82,7 +82,7 @@ For each file the app builds a small, structured "state":
 
 ### 5.6 Decisions and confidence
 - The model returns a destination folder **and a confidence**.
-- **Confidence ≥ threshold** (configurable, default 0.75): file is moved automatically.
+- **Confidence ≥ threshold** (configurable, default 0.9, chosen from the M1 eval; see MODEL.md): file is moved automatically.
 - The model can also answer **"none of these folders fit"**. That file is left where it is too.
 - **Below threshold:** the file is **left where it is** and listed in the app's **Review** list with the model's top suggestions. The user can accept a suggestion, pick another folder, or ignore the file.
 - Ignored files are not re-asked on every scan unless they change.

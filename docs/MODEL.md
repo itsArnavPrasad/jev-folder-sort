@@ -48,7 +48,7 @@ Choice("Which folder does this file belong in?",
 
 ### 3.2 Confidence
 
-`confidence` is the top-1 probability of the Choice softmax. The app auto-moves only when it's ≥ the user's threshold (default 0.75) and the answer isn't `__none__`. RLCD's calibration terms are what make this safe: a threshold of 0.9 should *mean* about 90% right. We measure calibration (ECE) on every checkpoint. open-jev's separate evidential `head_confidence` isn't used for gating yet.
+`confidence` is the top-1 probability of the Choice softmax. The app auto-moves only when it's ≥ the user's threshold (default 0.9, from the M1 eval below) and the answer isn't `__none__`. RLCD's calibration terms are what make this safe: a threshold of 0.9 should *mean* about 90% right. We measure calibration (ECE) on every checkpoint. open-jev's separate evidential `head_confidence` isn't used for gating yet.
 
 ## 4. Changes around open-jev
 
@@ -80,7 +80,36 @@ Goal: a general-purpose "file → folder" chooser that works reasonably on a fol
 
 #### Results
 
-RESULTS_PLACEHOLDER
+6,000 steps (batches of 16 files), about 45 minutes on the CPU of an 8 GB M-series Mac. Checkpoint `base-0.1.0`, selected at step 6,000 on synthetic validation (92.5% top-1).
+
+Held-out messy set (150 files; `uv run python -m jevsort_engine.eval --model checkpoints/base`):
+
+| | top-1 | ECE | auto-moved @0.75 | precision @0.75 | wrong moves @0.75 | auto-moved @0.9 | precision @0.9 | wrong moves @0.9 | ms/file |
+|---|---|---|---|---|---|---|---|---|---|
+| Keyword baseline | 33.3% | 0.237 | 22.7% | 79.4% | 4.7% | 22.7% | 79.4% | 4.7% | <0.1 |
+| base-0.1.0, step 2,000 | 58.0% | 0.069 | 36.7% | 83.6% | 6.0% | 24.7% | 89.2% | 2.7% | 8.8 |
+| **base-0.1.0, step 6,000** | **61.3%** | 0.194 | 51.3% | 81.8% | 9.3% | **33.3%** | **92.0%** | **2.7%** | 2–7 |
+
+"Wrong moves" is the share of *all* files that would be auto-moved to an unacceptable folder.
+
+**What this means:**
+- The exit bar is met: the model is almost twice as accurate as the baseline, at a few ms per file.
+- It **overfits the synthetic distribution**. Synthetic val kept climbing (67% → 92.5%) while held-out top-1 barely moved (58% → 61%) and calibration got worse (ECE 0.07 → 0.19).
+- At 0.75 it would wrongly move 9% of files, which misses the PRD's under-5% target. **The app's default threshold is therefore 0.9**: 92% precision, 2.7% wrong moves, a third of files sorted automatically, and the rest left for review.
+
+**Typical mistakes** (from the error analysis):
+- Generic folders like "Documents" and "Media" (the generator's group names don't include them).
+- Ignoring folder descriptions (`banner_final.psd` → Apps at 0.98 when Images says "photos, screenshots, graphics").
+- Opaque binaries (`Unknown.bin` → Dev instead of none).
+- Parent-vs-leaf confusion (IMG files → `Pictures` instead of `Pictures/Camera Roll`). Most of these fall below 0.75, so they stay put.
+
+**Next data iteration** (before M6):
+1. Add generic groups (Documents, Media, Stuff, Misc) and trees where folder names are uninformative and only the description tells you what goes there, so the model has to read descriptions.
+2. Add more `__none__` examples for opaque binaries and off-topic files.
+3. Add photo and screenshot leaves under generic parents.
+4. Early-stop on a small hand-labelled *dev* set that stays separate from the eval set, instead of on synthetic val.
+5. Personalisation (Stage B) on the user's own files is expected to give the biggest gain.
+
 
 ### Stage B: bootstrap on the user's tree (on-device, first run)
 

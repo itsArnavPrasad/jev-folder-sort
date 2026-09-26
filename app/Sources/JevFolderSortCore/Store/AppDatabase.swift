@@ -5,7 +5,7 @@ public struct AppSettings: Equatable, Sendable {
     public static let intervals = [5, 10, 15]
 
     public var intervalMinutes = 10
-    public var confidenceThreshold = 0.75
+    public var confidenceThreshold = 0.9
     public var textLimitKB = 4
     public var previewMode = false
     public var paused = false

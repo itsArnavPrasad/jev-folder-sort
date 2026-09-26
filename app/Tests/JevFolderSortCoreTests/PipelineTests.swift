@@ -61,7 +61,7 @@ struct PipelineTests {
         try fx.file("Inbox/sub/nested.pdf")
         try fx.file("Outside/decoy.pdf")
         let (db, pipeline, classifier) = try setup(fx, answers: [
-            "w2.txt": ("f2", 0.95), "IMG_1.jpg": ("f3", 0.8), "unsure.txt": ("f1", 0.4),
+            "w2.txt": ("f2", 0.95), "IMG_1.jpg": ("f3", 0.92), "unsure.txt": ("f1", 0.4),
             "nothing.bin": ("__none__", 0.99), "evil.txt": ("../../Outside", 0.99),
         ])
 
