@@ -40,6 +40,8 @@ What the app may touch is defined by the user on the Scope pane ([PRD §4](PRD.m
   - the file's device and inode haven't changed.
 
   It then moves the file with `renamex_np(…, RENAME_EXCL)`, which is atomic and never overwrites. A clash retries with `name 2.ext`, `name 3.ext`, and so on.
+- **`ScopeGuard.undo(entry)`** is the only way back. It works only if the *same file* (same inode) is still where the app put it, that place is inside the root, and the file's original folder is still watched. It never overwrites. The restored file goes onto the Review list and into the snapshot, so it isn't re-sorted straight away.
+- **`FolderEditor`** covers the one user-initiated exception: *New folder* in the Structure editor. It `mkdir`s a single empty folder directly inside the root, or inside an existing scope folder. The sorter itself never creates folders, and nothing deletes or renames them.
 - A test (`noOtherCodeMovesOrDeletesFiles`) fails if any other source file uses `rename`, `moveItem`, `removeItem`, `unlink`, `copyItem` or `trashItem`.
 
 ## 3. The file pipeline
@@ -56,6 +58,24 @@ What the app may touch is defined by the user on the Scope pane ([PRD §4](PRD.m
 6. **EngineClient** sends the files that no rule matched in one batch, with the allowed folders as `{id, relative path, description}`.
 7. **Confidence gate.** An answer of `__none__`, an unknown id, or a confidence below the threshold → the file stays where it is and goes onto `pending_review`. In preview mode, even confident answers only become suggestions.
 8. **ScopeGuard** moves everything else. Each outcome is written to `move_history`: moved, pending, preview, or refused with a reason. Files left in place are added to the snapshot, so they aren't asked about again until they change.
+
+## 3a. Review, undo and learning
+
+- **`Actions`** handles what the user does in the UI:
+  - filing a Review item into a chosen allowed folder, through `ScopeGuard`;
+  - leaving it where it is;
+  - undoing a move or a whole run.
+
+  Filing from Review saves the file's `FileState` and chosen folder as a training example (`review`, or `refile` after an undo).
+- **`LearningCollector`** is **read-only** in the destination tree:
+  - **Bootstrap:** reads up to 25 newest visible files at the top level of each allowed folder and saves them as `bootstrap` examples.
+  - **Implicit corrections:** each run, it checks moves from the last 30 days. If a moved file's inode now sits in a *different* allowed folder, the user re-filed it: that becomes an `implicit` example and the history row is marked `corrected_to`.
+- **`Learner`** decides when to train and runs a *separate* sandboxed engine process (`train_user` op), so sorting isn't blocked:
+  - It trains automatically once there are ≥ 20 new examples, learning is on, and the Mac is on AC power (`IOPSGetProvidingPowerSourceType`). There's also *Retrain now*.
+  - It always fine-tunes from the **base** checkpoint using all examples, which avoids drift from repeated fine-tunes.
+  - The engine trains only the read-out and heads, holds out 20% of the examples, and writes `models/user/` atomically, **only if** the new model is at least as good there as the one in use.
+  - The main engine then restarts, and serves the user checkpoint when there is one.
+  - *Forget personalisation* asks the engine to delete its own `models/user/` (the `reset_user` op).
 
 ## 4. Engine protocol
 
@@ -79,7 +99,7 @@ Response:
 
 - `choice` is always one of the given folder ids or the reserved `__none__` ("none of these folders fit"). This follows from the Choice head's structure.
 - `confidence` is the top-1 probability.
-- Other ops: `health` (returns protocol version, model version, `model` or `stub`, device), `load_model`, `shutdown`.
+- Other ops: `health` (returns protocol version, model version, `model` or `stub`, device), `load_model`, `train_user` (base, out, tree, examples → report), `reset_user`, `shutdown`.
 - Errors come back as `{"ok": false, "error": "..."}` and never crash the loop.
 - Protocol version: 1. `EngineClient` refuses an engine that reports a different one.
 
@@ -87,12 +107,12 @@ Engine sandbox profile (in `EngineClient.swift`): `(deny network*)` except unix 
 
 ## 5. Data storage
 
-All under `~/Library/Application Support/jev-folder-sort/`:
+All under `~/Library/Application Support/jev-folder-sort/`, or `$JEVSORT_DATA_DIR` if that's set (tests and headless runs use a folder inside the repo):
 
 | Store | Contents |
 |---|---|
-| `app.sqlite` (GRDB) | `setting`, `source_folder`, `dest_folder`, `rule`, `snapshot`, `run`, `move_history`, `pending_review` |
-| `models/` (M6+) | The user's fine-tuned checkpoint |
+| `app.sqlite` (GRDB) | `setting`, `source_folder`, `dest_folder`, `rule`, `snapshot`, `run`, `move_history` (with `dest_inode`, `undone_at`, `corrected_to`, `latency_ms`), `pending_review`, `training_example` |
+| `models/user/` | The personalised checkpoint (written only by the sandboxed engine; the sandbox's `MODEL_DIR`) |
 
 During development the engine runs from the repo's `engine/` folder, with its checkpoint in `engine/checkpoints/base/`. Training examples (M6) store the extracted state and the chosen folder, not the file itself.
 
@@ -103,45 +123,64 @@ During development the engine runs from the repo's `engine/` folder, with its ch
 - **Menu-bar only** (`LSUIElement`), with SwiftUI `MenuBarExtra`, a `Settings` scene and an `Activity` window.
 - **Launch at login** uses `SMAppService.mainApp`, which only works when running from the `.app` bundle.
 
-## 7. Packaging the engine (M8)
+## 7. Packaging (M8)
 
-The release `.dmg` must run on a Mac with no Python installed. The plan:
-- Bundle a relocatable CPython (python-build-standalone), the arm64 PyTorch wheel and the engine package inside `JevFolderSort.app/Contents/Resources/engine/`, trimmed and code-signed.
-- Ship the base checkpoint as a release asset (58 MB in fp16).
+`scripts/bundle_engine.sh` builds `build/engine/`. It runs without any Python installed on the target Mac:
+- `python/`: a relocatable CPython 3.12 (python-build-standalone, fetched by uv).
+- `site-packages/`: the exact versions from `engine/uv.lock`, minus training-only packages (`huggingface_hub`, `hf_xet`, `setuptools`). Headers, tests and static libraries are trimmed, local symbols are stripped (−59 MB on `libtorch_cpu`), and each library is re-signed.
+- `app/`: `jevsort_engine`, `datasets` (used for replay during personalisation) and `open_jev`.
+- `checkpoints/base/`: the model.
+- Everything is precompiled to `.pyc`, because the sandbox forbids writing bytecode at runtime.
 
-Core ML export, which would drop PyTorch from the install, is on the roadmap.
+`scripts/build_app.sh --release` embeds that at `JevFolderSort.app/Contents/Resources/engine/`. It then signs from the inside out: every `.dylib`/`.so`, the Python and `torch_shm_manager` executables (with `scripts/engine.entitlements`), then the app. Signing is ad-hoc by default, or uses `SIGN_IDENTITY` with the hardened runtime. `EngineLaunch.bundled` finds the bundled engine and sets `PYTHONPATH`, `PYTHONNOUSERSITE` and `PYTHONDONTWRITEBYTECODE`.
+
+`scripts/make_dmg.sh` builds a drag-to-Applications DMG (~340 MB) with first-launch instructions and a SHA-256. `scripts/notarize.sh` signs with a Developer ID, then notarizes and staples. `scripts/release.sh` runs:
+1. all the tests;
+2. the bundle, app and DMG builds;
+3. a **headless end-to-end run of the release app on the demo playground**;
+4. writing the artifacts to `build/release/`.
+
+See [RELEASING.md](RELEASING.md).
+
+### Headless mode
+
+`JevFolderSort --headless [--demo DIR] [--stub] [--preview] [--sort] [--undo-last-run] [--train]` runs the real pipeline without UI and prints a JSON summary. It **refuses to run unless `JEVSORT_DATA_DIR` is set**, so scripted runs can't touch the real app data. It's used by `release.sh` and for manual end-to-end checks against `examples/demo`.
 
 ## 8. Repository layout
 
 ```
 jev-folder-sort/
 ├── app/                                  # SwiftPM package (builds with Command Line Tools only)
-│   ├── Package.swift
 │   ├── Sources/JevFolderSortCore/
-│   │   ├── Scope/       Scope.swift (config, policy, issues) · ScopeGuard.swift · FolderImport.swift
-│   │   ├── Pipeline/    Scanner · Extractor · Rules · Pipeline · Scheduler
-│   │   ├── Engine/      EngineClient.swift (process, sandbox, protocol)
-│   │   └── Store/       AppDatabase.swift (GRDB schema + queries)
-│   ├── Sources/JevFolderSort/            # SwiftUI: AppModel, PopoverView, SettingsView, ActivityView
-│   └── Tests/JevFolderSortCoreTests/     # Swift Testing
+│   │   ├── Scope/       Scope · ScopeGuard (move + undo) · FolderImport · FolderEditor
+│   │   ├── Pipeline/    Scanner · Extractor · Rules · Pipeline · Scheduler · Actions · Learning · Learner
+│   │   ├── Engine/      EngineClient (process, sandbox, protocol, EngineLaunch dev/bundled)
+│   │   └── Store/       AppDatabase (schema v2, stats)
+│   ├── Sources/JevFolderSort/            # SwiftUI: AppModel, MainWindow (Review/Activity/Structure/Stats),
+│   │                                     #   SettingsView, PopoverView, OnboardingView, Headless
+│   ├── Assets/                           # AppIcon.icns
+│   └── Tests/JevFolderSortCoreTests/     # Swift Testing; fixtures in app/.test-fixtures (gitignored)
 ├── engine/                               # uv project, Python 3.12
-│   ├── jevsort_engine/  tokenizer · state · model · baseline · server · train · eval
-│   ├── datasets/        ontology.py · generate.py · eval/messy.py (hand-written held-out set)
+│   ├── jevsort_engine/  tokenizer · state · model · baseline · server · train · eval · personalize
+│   ├── datasets/        ontology · generate · eval/messy.py (held-out) · eval/dev.py (selection)
 │   ├── third_party/open_jev/             # vendored, unmodified (Apache-2.0)
 │   └── tests/
-├── scripts/             build_app.sh · test.sh
-├── docs/
-├── LICENSE · NOTICE
+├── examples/demo/                        # generated by scripts/make_demo.sh (gitignored)
+├── scripts/             test · build_app · bundle_engine · make_dmg · notarize · release · make_demo · fetch_model · make_icon
+├── .github/workflows/ci.yml
+└── docs/
 ```
 
 ## 9. Development
 
 ```bash
 cd engine && uv sync && uv run pytest               # engine + tests
-uv run python -m jevsort_engine.train               # train the base checkpoint (~45 min on CPU)
+uv run python -m jevsort_engine.train               # train the base checkpoint (~1 h on CPU), or scripts/fetch_model.sh
 uv run python -m jevsort_engine.eval --model checkpoints/base
 scripts/test.sh                                     # Swift tests (works without Xcode)
+scripts/make_demo.sh                                # demo playground inside the repo
 scripts/build_app.sh && open build/JevFolderSort.app
+JEVSORT_DATA_DIR=$PWD/.jevsort-data app/.build/debug/JevFolderSort --headless --demo examples/demo --sort
 ```
 
 ## 10. Testing
@@ -171,4 +210,21 @@ scripts/build_app.sh && open build/JevFolderSort.app
   - that the first N KB of text is sent;
   - that unchanged files aren't asked about again;
   - that rules beat the model, preview mode moves nothing, an invalid scope runs nothing, and in-progress downloads are skipped.
-- **Integration:** the real Python engine in `--stub` mode runs through `EngineClient` inside the sandbox, doing an end-to-end sort on a temp tree.
+- **Undo/Review/Learning:**
+  - undo puts files back and they aren't re-sorted;
+  - a double undo is refused;
+  - undo of a replaced file is refused, and so is undo into an unwatched folder;
+  - undo never overwrites;
+  - undoing a run undoes all of its moves;
+  - filing from Review goes through the guard and records an example, and can't escape the scope;
+  - "leave it" isn't asked again;
+  - folder creation stays inside the root and rejects bad names;
+  - bootstrap reads allowed folders only and moves nothing;
+  - re-filing a sorted file is detected as a correction.
+- **Integration (real engine, sandboxed):**
+  - an end-to-end sort in stub mode;
+  - a 300-file batch round-trips intact;
+  - personalisation end to end: bootstrap, fine-tune, the user model written only inside the models dir, and reset.
+- **Engine:** personalisation learns a user mapping from random weights, and refuses to run with too few examples.
+- **Release:** `release.sh` runs the release app headless on `examples/demo` and asserts it used its bundled engine.
+- **CI** (`.github/workflows/ci.yml`, macOS 15) runs the engine tests, the Swift tests and a development build.

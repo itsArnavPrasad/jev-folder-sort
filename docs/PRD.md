@@ -93,21 +93,24 @@ For each file the app builds a small, structured "state":
 - Every move is written to a local history log (source path, destination path, time, reason: rule or model + confidence).
 
 ### 5.8 Learning from corrections
-The model adapts to the user, locally:
+The model adapts to the user, locally. The app **reads** (never moves) files inside the allowed destination folders for this:
 - **Existing files** already inside the destination tree are used as initial examples ("bootstrap").
 - **Explicit corrections:** undoing a move and re-filing it, or choosing a folder in the Review list.
 - **Implicit corrections:** if a file the app moved is found in a different destination folder on a later scan, that's treated as a correction.
-- Corrections are applied by periodic on-device fine-tuning (details in [MODEL.md](MODEL.md)).
+- Corrections are applied by on-device fine-tuning (details in [MODEL.md](MODEL.md)). It runs automatically after 20 new examples, only on mains power, or on demand with *Retrain now*. A new model is only used if it does at least as well on held-out examples. *Learn from my corrections* can be turned off, and *Forget personalisation* returns to the base model.
 
 ### 5.9 UI screens
 | Screen | Contents |
 |---|---|
-| **Menu bar popover** | Status (idle / scanning / sorting), last run, files sorted today, Review count, *Sort now*, *Pause*, open main window |
-| **Activity / History** | Chronological list of moves with reason and confidence; undo a single move or an entire run |
-| **Review** | Files below the confidence threshold with top-3 suggestions; accept / choose / ignore |
-| **Structure** | Folder-tree editor, import from disk, per-folder description and rules |
-| **Stats** | Files sorted (total, this week), per-folder counts, auto vs. review ratio, average decision time, corrections count |
-| **Settings** | Watched folders, scan interval, confidence threshold, text read limit (N KB), "ask before moving" (preview mode), launch at login, model status (version, last trained, *Retrain now*) |
+| **Menu-bar popover** | Status, sorted today, files to review, last run, a *learning…* indicator, *Sort now*, *Pause/Resume*, *Review N… / Open…*, Settings, Quit |
+| **Main window → Review** | Files the model was unsure about (or undone files): top-3 suggestions as one-click buttons, *Move to…* any allowed folder, *Leave it*, Show in Finder |
+| **Main window → Activity** | Every move, suggestion, refusal and undo, with reason and confidence. *Undo this move* / *Undo whole run*. Corrections are shown as `Taxes → Finance` |
+| **Main window → Structure** | Folder tree of the root: allowed toggle, description, rules (extension / name matches / downloaded from / file type), *New folder* (inside the root only), *Rescan* |
+| **Main window → Stats** | Files sorted (total, this week), to review, time per decision, share sorted automatically, by rules, corrections learned, undone, a 7-day chart, top folders, model info |
+| **Settings → Scope** | Plain-English summary, problems, watched folders, destination root, allowed-folder checklist with descriptions |
+| **Settings → General** | Interval (5/10/15 min), confidence threshold, text read limit (0–32 KB), preview mode, learn from corrections, pause, launch at login |
+| **Settings → Model** | Engine status and restart. Learning: examples by source, new since training, last trained, last result, *Retrain now*, *Forget personalisation*. Development: engine folder, stub toggle |
+| **Welcome (first launch)** | A three-step scope setup with live checkmarks, a recommendation to start in preview mode, and scope validation |
 
 ### 5.10 Platform and distribution
 - macOS 14 Sonoma or later, **Apple Silicon first** (Intel best-effort, not tested for v1).

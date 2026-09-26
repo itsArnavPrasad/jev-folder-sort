@@ -46,10 +46,19 @@ Product and technical decisions for v1, with the reasoning behind each.
 | T18 | Inference and training default to **CPU**, not MPS | At ~30M params CPU is faster (MPS launch overhead, ~1 s warm-up) |
 | T19 | Engine: **uv + Python 3.12**; app: **SwiftPM** (no Xcode project) | System Python is 3.14 (torch wheels lag); only the Command Line Tools are installed — `scripts/test.sh` wires up Swift Testing without Xcode |
 | T20 | Held-out eval is **hand-written** and never used for model selection | Keeps reported accuracy honest about transfer to real files |
+| T21 | Checkpoints selected on a separate hand-written **dev set** (top-1 − ½·ECE); messy eval stays held-out | Synthetic val overfit badly in base-0.1.0 (92% val vs 61% eval) |
+| T22 | **Undo goes through `ScopeGuard`** and requires the same inode, a location inside the root, and a still-watched original folder; undone files go to Review | Undo is also a move and gets the same guarantees; it avoids re-sorting a file the user just rejected |
+| T23 | The Structure editor may **create** a folder inside the root (user action, `mkdir` only); nothing ever deletes or renames folders | Matches "build the tree in the UI" without giving the sorter the power to create folders |
+| T24 | Learning **reads** allowed destination folders (bootstrap, implicit corrections) but never moves inside them | User approved read-only access; moves still only originate from watched folders |
+| T25 | Personalisation always fine-tunes **from base with all examples**, trains read-out + heads only, with synthetic replay; it activates only if not worse on a 20% hold-out, in a **separate sandboxed trainer process**, on AC power | No drift or forgetting; a bad fine-tune can't replace a good model; sorting isn't blocked |
+| T26 | **All testing inside the repo**: fixtures in `app/.test-fixtures`, the demo in `examples/demo`, `JEVSORT_DATA_DIR`; headless mode refuses to run without it | The user's own files and app data are never touched by tests |
+| T27 | Release DMG **bundles everything** (python-build-standalone 3.12, pinned PyTorch, model) → ~340 MB | Works fully offline with nothing installed, consistent with "local only" |
+| T28 | **Ad-hoc signing** now, `notarize.sh` for later | No Developer ID yet; README explains the one-time right-click → Open |
+| T29 | GitHub: everything prepared and committed locally; **the maintainer pushes and publishes** | Publishing is the owner's action |
+| T30 | No co-author trailers in commit messages | Maintainer preference |
 
 ## Open questions
 
-- **Apple Developer account** ($99/yr) is needed to sign and notarize the DMG. Without one, users have to right-click → Open past Gatekeeper warnings.
-- **Next data iteration** (see MODEL.md results): generic "Documents"/"Media"-style folders, training that forces use of folder descriptions, and more "none" cases for opaque binaries.
+- **Apple Developer account** ($99/yr): needed to notarize (`scripts/notarize.sh`, untested until an identity exists). Until then users right-click → Open once.
 - **Cross-volume moves** (e.g. Downloads → external drive): refused in v1; needs a safe copy-verify-delete path.
 - ~~Base training data recipe~~ → template ontology + random trees (MODEL.md §5). ~~Backbone~~ → MiniLM-L6 vocabulary/embeddings.

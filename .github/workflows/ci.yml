@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15   # Apple Silicon; Xcode 16 / Swift 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Engine — install
+        working-directory: engine
+        run: uv sync --frozen
+
+      - name: Engine — tests
+        working-directory: engine
+        run: uv run pytest -q
+
+      - name: App — tests (incl. real sandboxed engine in stub mode)
+        run: scripts/test.sh
+
+      - name: App — build
+        run: scripts/build_app.sh
