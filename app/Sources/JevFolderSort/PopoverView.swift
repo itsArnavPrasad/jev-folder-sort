@@ -21,9 +21,12 @@ struct PopoverView: View {
             }
 
             HStack(spacing: 16) {
-                stat("\(model.sortedToday)", "sorted today")
-                stat("\(model.pendingCount)", "to review")
+                stat("\(model.stats.movedToday)", "sorted today")
+                stat("\(model.pending.count)", "to review")
                 stat(lastRunText, "last run")
+            }
+            if model.isTraining {
+                Label("Learning from your corrections…", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {
@@ -40,9 +43,10 @@ struct PopoverView: View {
 
             Divider()
             HStack {
-                Button("Activity…") {
+                Button(model.pending.isEmpty ? "Open…" : "Review \(model.pending.count)…") {
+                    model.section = model.pending.isEmpty ? .activity : .review
                     bringToFront()
-                    openWindow(id: "activity")
+                    openWindow(id: "main")
                 }
                 SettingsLink { Text("Settings…") }
                     .simultaneousGesture(TapGesture().onEnded { bringToFront() })

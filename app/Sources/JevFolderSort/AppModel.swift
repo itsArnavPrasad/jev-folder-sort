@@ -3,28 +3,48 @@ import Foundation
 import JevFolderSortCore
 import ServiceManagement
 
+enum Pane: String, CaseIterable, Identifiable {
+    case review = "Review", activity = "Activity", structure = "Structure", stats = "Stats"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .review: "questionmark.folder"
+        case .activity: "clock.arrow.circlepath"
+        case .structure: "folder.badge.gearshape"
+        case .stats: "chart.bar"
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var settings = AppSettings()
     @Published private(set) var scope = ScopeConfig()
+    @Published private(set) var rules: [Rule] = []
     @Published private(set) var issues: [ScopeIssue] = []
     @Published private(set) var status = "Idle"
     @Published private(set) var isSorting = false
+    @Published private(set) var isTraining = false
     @Published private(set) var lastRun: RunRecord?
-    @Published private(set) var sortedToday = 0
-    @Published private(set) var pendingCount = 0
+    @Published private(set) var stats = SortStats()
+    @Published private(set) var pending: [PendingItem] = []
     @Published private(set) var history: [HistoryEntry] = []
+    @Published private(set) var learning: Learner.Status?
     @Published private(set) var engineStatus = "Not started"
+    @Published var section: Pane = .review
     @Published var alert: String?
 
     let policy = ScopePolicy.system
-    private let db: AppDatabase
+    let db: AppDatabase
+    let dataDirectory: URL
     private var engine: EngineClient?
     private var scheduler: Scheduler!
+    private var actions: Actions { Actions(db: db, policy: policy) }
 
     init() {
         do {
-            db = try AppDatabase(path: try AppDatabase.defaultURL().path)
+            dataDirectory = try AppDatabase.dataDirectory()
+            db = try AppDatabase(path: dataDirectory.appendingPathComponent("app.sqlite").path)
         } catch {
             fatalError("Could not open the app database: \(error)")
         }
@@ -35,12 +55,42 @@ final class AppModel: ObservableObject {
             try? db.save(settings)
         }
         scope = (try? db.scope()) ?? ScopeConfig()
+        rules = (try? db.rules()) ?? []
         scheduler = Scheduler(intervalMinutes: settings.intervalMinutes) { [weak self] trigger in
             await self?.runPipeline(trigger: trigger)
         }
         scheduler.paused = settings.paused
         scheduler.start()
         refresh()
+    }
+
+    var needsOnboarding: Bool { !settings.onboardingDone && scope.sources.isEmpty }
+
+    // MARK: engine
+
+    /// The bundled engine in release builds; the repo's engine/ in development.
+    func engineLaunch() throws -> EngineLaunch {
+        let models = dataDirectory.appendingPathComponent("models").path
+        if let bundled = EngineLaunch.bundled(modelDirectory: models, stub: settings.useStubEngine) { return bundled }
+        return try EngineLaunch.development(engineDirectory: settings.engineDirectory, stub: settings.useStubEngine, modelDirectory: models)
+    }
+
+    private func startEngineIfNeeded() async throws -> EngineClient {
+        if let engine { return engine }
+        let client = EngineClient(launch: try engineLaunch())
+        engineStatus = "Starting…"
+        let health = try await client.start()
+        engineStatus = "\(health.model) (\(health.kind)) on \(health.device)"
+        engine = client
+        return client
+    }
+
+    func restartEngine() {
+        Task {
+            await engine?.stop()
+            engine = nil
+            do { _ = try await startEngineIfNeeded() } catch { engineStatus = "\(error)" }
+        }
     }
 
     // MARK: sorting
@@ -70,31 +120,55 @@ final class AppModel: ObservableObject {
             status = "Engine unavailable"
             engineStatus = "\(error)"
         }
-    }
-
-    private func startEngineIfNeeded() async throws -> EngineClient {
-        if let engine { return engine }
-        let launch = try EngineLaunch.development(engineDirectory: settings.engineDirectory, stub: settings.useStubEngine)
-        let client = EngineClient(launch: launch)
-        engineStatus = "Starting…"
-        let health = try await client.start()
-        engineStatus = "\(health.model) (\(health.kind)) on \(health.device)"
-        engine = client
-        return client
-    }
-
-    func restartEngine() {
-        Task {
-            await engine?.stop()
-            engine = nil
-            do { _ = try await startEngineIfNeeded() } catch { engineStatus = "\(error)" }
-        }
+        await maybeTrain()
     }
 
     func setPaused(_ paused: Bool) {
-        settings.paused = paused
+        var s = settings
+        s.paused = paused
         scheduler.paused = paused
-        save(settings)
+        save(s)
+    }
+
+    // MARK: review + undo
+
+    func file(_ item: PendingItem, into folder: DestinationFolder) {
+        report(try actions.file(pendingPath: item.path, into: folder.id, textLimitKB: settings.textLimitKB))
+        refresh()
+        Task { await maybeTrain() }
+    }
+
+    func folder(forPath path: String) -> DestinationFolder? {
+        scope.allowedFolders.first { $0.relativePath == path }
+    }
+
+    func ignore(_ item: PendingItem) {
+        try? actions.ignore(pendingPath: item.path)
+        refresh()
+    }
+
+    func undo(_ entry: HistoryEntry) {
+        guard let id = entry.id else { return }
+        report(try actions.undo(entryID: id))
+        refresh()
+    }
+
+    func undoRun(_ runID: Int64) {
+        do {
+            let r = try actions.undo(runID: runID)
+            if !r.failed.isEmpty { alert = "Undid \(r.undone). Couldn't undo:\n" + r.failed.joined(separator: "\n") }
+        } catch { alert = "\(error)" }
+        refresh()
+    }
+
+    func reveal(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private func report(_ result: @autoclosure () throws -> Result<MoveOutcome, ScopeViolation>) {
+        do {
+            if case .failure(let v) = try result() { alert = "Not moved: \(v)" }
+        } catch { alert = "\(error)" }
     }
 
     // MARK: scope
@@ -103,6 +177,7 @@ final class AppModel: ObservableObject {
     func update(scope newScope: ScopeConfig) {
         scope = newScope
         do { try db.save(newScope) } catch { alert = "Couldn't save scope: \(error)" }
+        rules = (try? db.rules()) ?? []
         refresh()
     }
 
@@ -166,15 +241,92 @@ final class AppModel: ObservableObject {
         try? db.save(s)
     }
 
+    /// Structure editor: create a real folder inside the root, then add it to the scope.
+    func createFolder(named name: String, in parent: String?) {
+        switch FolderEditor.createFolder(named: name, in: parent, config: scope, policy: policy) {
+        case .success: rescanFolders()
+        case .failure(let f): alert = "Couldn't create folder: \(f)"
+        }
+    }
+
+    // MARK: rules
+
+    func rules(for folderID: String) -> [Rule] { rules.filter { $0.folderID == folderID } }
+
+    func addRule(folderID: String, kind: Rule.Kind, pattern: String) {
+        let p = pattern.trimmingCharacters(in: .whitespaces)
+        guard !p.isEmpty else { return }
+        saveRules(rules + [Rule(folderID: folderID, kind: kind, pattern: p)])
+    }
+
+    func deleteRule(_ rule: Rule) {
+        saveRules(rules.filter { !($0.id == rule.id && $0.folderID == rule.folderID && $0.pattern == rule.pattern && $0.kind == rule.kind) })
+    }
+
+    private func saveRules(_ new: [Rule]) {
+        do { try db.save(rules: new) } catch { alert = "Couldn't save rules: \(error)" }
+        rules = (try? db.rules()) ?? []
+    }
+
+    // MARK: learning
+
+    func retrainNow() {
+        Task { await train(force: true) }
+    }
+
+    private func maybeTrain() async {
+        guard !isTraining, let launch = try? engineLaunch(),
+              (try? Learner(db: db, policy: policy, launch: launch).shouldTrainAutomatically()) == true
+        else { return }
+        await train(force: false)
+    }
+
+    private func train(force: Bool) async {
+        guard !isTraining else { return }
+        guard issues.isEmpty else { alert = "Set up your scope first."; return }
+        isTraining = true
+        defer { isTraining = false; refresh() }
+        do {
+            let learner = Learner(db: db, policy: policy, launch: try engineLaunch())
+            let report = try await learner.train()
+            if report.activated { restartEngine() }
+            if force {
+                alert = report.activated
+                    ? "Personalised model is now active (held-out accuracy \(pct(report.newAccuracy)) vs \(pct(report.currentAccuracy)))."
+                    : "Kept the current model: \(report.reason ?? "no improvement")."
+            }
+        } catch {
+            if force { alert = "Training failed: \(error)" }
+        }
+    }
+
+    func resetLearning() {
+        Task {
+            do {
+                try await Learner(db: db, policy: policy, launch: try engineLaunch()).reset()
+                restartEngine()
+            } catch { alert = "\(error)" }
+            refresh()
+        }
+    }
+
     // MARK: settings
 
     func save(_ new: AppSettings) {
         let intervalChanged = new.intervalMinutes != settings.intervalMinutes
         let engineChanged = new.engineDirectory != settings.engineDirectory || new.useStubEngine != settings.useStubEngine
         settings = new
+        scheduler.paused = new.paused
         do { try db.save(new) } catch { alert = "Couldn't save settings: \(error)" }
         if intervalChanged { scheduler.reschedule(intervalMinutes: new.intervalMinutes) }
         if engineChanged { restartEngine() }
+        refresh()
+    }
+
+    func finishOnboarding() {
+        var s = settings
+        s.onboardingDone = true
+        save(s)
     }
 
     var launchAtLogin: Bool {
@@ -189,14 +341,15 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: stats
+    // MARK: refresh
 
     func refresh() {
         issues = scope.issues(policy: policy)
         lastRun = try? db.lastRun()
-        sortedToday = (try? db.movedCount(since: Calendar.current.startOfDay(for: Date()))) ?? 0
-        pendingCount = (try? db.pendingCount()) ?? 0
+        stats = (try? db.stats()) ?? SortStats()
+        pending = (try? db.pendingItems()) ?? []
         history = (try? db.history()) ?? []
+        learning = (try? engineLaunch()).flatMap { try? Learner(db: db, policy: policy, launch: $0).status() }
         if !isSorting {
             if !issues.isEmpty { status = "Set up your scope in Settings" }
             else if settings.paused { status = "Paused" }
@@ -204,3 +357,5 @@ final class AppModel: ObservableObject {
         }
     }
 }
+
+func pct(_ v: Double?) -> String { v.map { "\(Int(($0 * 100).rounded()))%" } ?? "—" }

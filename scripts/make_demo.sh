@@ -60,6 +60,15 @@ pdf Sorted/Finance/Receipts/apple_store_receipt.pdf "Apple Store. AirPods Pro. T
 pdf Sorted/School/Lectures/Lecture_06_Greedy.pdf "CS 161 Lecture 6: Greedy algorithms"
 pdf Sorted/Work/Invoices/INV-0041_Solace.pdf "INVOICE #0041\nBill to: Solace Coffee\nTotal EUR 1,200.00"
 txt Sorted/Code/utils.py "def slugify(s):\n    return s.lower().replace(' ', '-')"
+pdf Sorted/Finance/Taxes/1099-INT_2024.pdf "Form 1099-INT 2024\nInterest income 312.00"
+pdf Sorted/Finance/Bank/Chase_Statement_Jun2025.pdf "Chase Total Checking\nStatement period June 2025\nEnding balance \$2,100.00"
+pdf Sorted/Finance/Receipts/ikea_order.pdf "IKEA order confirmation\nKALLAX shelf\nTotal \$89.00"
+pdf Sorted/School/Assignments/problem_set_2.pdf "Problem Set 2. Due Friday.\nProve the loop invariant."
+pdf Sorted/Work/Contracts/NDA_Solace.pdf "Mutual non-disclosure agreement between Alex Doe Design and Solace Coffee."
+pdf Sorted/Travel/Hotel_Porto.pdf "Booking confirmation. Hotel in Porto. Check-in 2 nights."
+txt Sorted/Code/cleanup.sh "#!/bin/bash\nfind . -name '*.log' -delete"
+img "Sorted/Pictures/Screenshots/Screenshot 2025-08-01 at 10.00.00.png" png
+img Sorted/Pictures/Photos/IMG_4400.jpg jpeg
 
 # --- decoys outside the scope
 txt Untouchable/do_not_move_W2.txt "Form W-2 decoy outside the scope"

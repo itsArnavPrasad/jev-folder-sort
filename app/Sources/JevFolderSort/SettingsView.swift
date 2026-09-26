@@ -8,7 +8,7 @@ struct SettingsView: View {
         TabView {
             ScopeSettingsView().tabItem { Label("Scope", systemImage: "lock.shield") }
             GeneralSettingsView().tabItem { Label("General", systemImage: "gearshape") }
-            EngineSettingsView().tabItem { Label("Engine", systemImage: "cpu") }
+            EngineSettingsView().tabItem { Label("Model", systemImage: "cpu") }
         }
         .frame(width: 640, height: 620)
         .alert("jev-folder-sort", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
@@ -154,6 +154,7 @@ struct GeneralSettingsView: View {
                     }
                 }
                 Toggle("Preview mode — suggest moves but don't move anything", isOn: s.previewMode)
+                Toggle("Learn from my corrections", isOn: s.learningEnabled)
             }
             Section("App") {
                 Toggle("Pause sorting", isOn: s.paused)
@@ -172,6 +173,38 @@ struct EngineSettingsView: View {
         Form {
             Section {
                 LabeledContent("Status", value: model.engineStatus)
+                Button("Restart engine") { model.restartEngine() }
+            } header: {
+                Text("Local model")
+            } footer: {
+                Text("The open-jev model runs on this Mac in a sandbox with no network access and no write access to your files. It only sees file names, metadata and the first few KB of text, and answers with a folder id from your allowed list.")
+            }
+
+            Section {
+                if let l = model.learning {
+                    LabeledContent("Examples", value: "\(l.examples) (\(l.bySource.map { "\($0.value) \($0.key)" }.sorted().joined(separator: ", ")))")
+                    LabeledContent("New since last training", value: "\(l.newSinceTraining)")
+                    LabeledContent("Last trained", value: l.lastTrained?.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                    LabeledContent("Personalised model", value: l.personalised ? "active" : "not yet (using base model)")
+                    if let r = l.lastReport {
+                        LabeledContent("Last result", value: r.activated
+                            ? "activated — held-out \(pct(r.newAccuracy)) vs \(pct(r.currentAccuracy))"
+                            : (r.reason ?? "not activated"))
+                    }
+                }
+                HStack {
+                    Button(model.isTraining ? "Training…" : "Retrain now") { model.retrainNow() }
+                        .disabled(model.isTraining || !model.issues.isEmpty)
+                    Button("Forget personalisation", role: .destructive) { model.resetLearning() }
+                        .disabled(model.isTraining || model.learning?.personalised != true)
+                }
+            } header: {
+                Text("Learning")
+            } footer: {
+                Text("Learns from files already in your allowed folders (read-only), your Review choices, and files you re-file after the app sorted them. Retrains automatically after \(Learner.minimumNewExamples) new examples, only on mains power. A new model is only used if it does at least as well on held-out examples.")
+            }
+
+            Section("Development") {
                 HStack {
                     TextField("Engine folder", text: s.engineDirectory)
                     Button("Choose…") {
@@ -183,11 +216,8 @@ struct EngineSettingsView: View {
                     }
                 }
                 Toggle("Use keyword stub instead of the model", isOn: s.useStubEngine)
-                Button("Restart engine") { model.restartEngine() }
-            } header: {
-                Text("Local model")
-            } footer: {
-                Text("The open-jev model runs on this Mac in a sandbox with no network access and no write access to your files. It only sees file names, metadata and the first few KB of text, and answers with a folder id from your allowed list.")
+                Text("Release builds use the engine bundled inside the app; this folder is only used when running from source.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

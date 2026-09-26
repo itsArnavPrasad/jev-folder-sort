@@ -75,6 +75,29 @@ public struct PendingItem: Equatable, Sendable, Identifiable {
     public var suggestions: [Suggestion]
 }
 
+public struct SortStats: Equatable, Sendable {
+    public var movedAllTime = 0
+    public var movedThisWeek = 0
+    public var movedToday = 0
+    public var pending = 0
+    public var refused = 0
+    public var undone = 0
+    public var corrections = 0
+    public var byReason: [String: Int] = [:]  // rule / model / you
+    public var byFolder: [(folder: String, count: Int)] = []
+    public var byDay: [(day: Date, count: Int)] = []
+    public var averageConfidence: Double?
+    public var averageLatencyMs: Double?
+    public var runs = 0
+
+    public init() {}
+
+    public static func == (a: SortStats, b: SortStats) -> Bool {
+        a.movedAllTime == b.movedAllTime && a.movedThisWeek == b.movedThisWeek && a.pending == b.pending
+            && a.byReason == b.byReason && a.byFolder.map(\.folder) == b.byFolder.map(\.folder)
+    }
+}
+
 public struct TrainingExample: Equatable, Sendable {
     public var key: String
     public var state: FileState
@@ -489,6 +512,40 @@ public final class AppDatabase: @unchecked Sendable {
             } else {
                 try db.execute(sql: "DELETE FROM setting WHERE key = ?", arguments: [key])
             }
+        }
+    }
+
+    // MARK: stats
+
+    public func stats(now: Date = Date()) throws -> SortStats {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now).timeIntervalSince1970
+        let week = cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!.timeIntervalSince1970
+        return try queue.read { db in
+            var s = SortStats()
+            let moved = "status = 'moved' AND undone_at IS NULL"
+            s.movedAllTime = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM move_history WHERE \(moved)") ?? 0
+            s.movedThisWeek = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM move_history WHERE \(moved) AND at >= ?", arguments: [week]) ?? 0
+            s.movedToday = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM move_history WHERE \(moved) AND at >= ?", arguments: [today]) ?? 0
+            s.pending = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM pending_review") ?? 0
+            s.refused = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM move_history WHERE status = 'refused'") ?? 0
+            s.undone = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM move_history WHERE undone_at IS NOT NULL") ?? 0
+            s.corrections = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM training_example WHERE source != 'bootstrap'") ?? 0
+            s.runs = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM run WHERE finished_at IS NOT NULL") ?? 0
+            for r in try Row.fetchAll(db, sql: "SELECT reason, COUNT(*) AS n FROM move_history WHERE \(moved) GROUP BY reason") {
+                s.byReason[r["reason"]] = r["n"]
+            }
+            s.byFolder = try Row.fetchAll(db, sql: """
+                SELECT folder_path, COUNT(*) AS n FROM move_history WHERE \(moved) AND folder_path IS NOT NULL
+                GROUP BY folder_path ORDER BY n DESC LIMIT 10
+                """).map { ($0["folder_path"], $0["n"]) }
+            s.byDay = try Row.fetchAll(db, sql: """
+                SELECT CAST((at - ?) / 86400 AS INTEGER) AS d, COUNT(*) AS n FROM move_history
+                WHERE \(moved) AND at >= ? GROUP BY d ORDER BY d
+                """, arguments: [week, week]).map { (Date(timeIntervalSince1970: week + Double($0["d"] as Int) * 86400), $0["n"]) }
+            s.averageConfidence = try Double.fetchOne(db, sql: "SELECT AVG(confidence) FROM move_history WHERE \(moved) AND reason = 'model'")
+            s.averageLatencyMs = try Double.fetchOne(db, sql: "SELECT AVG(latency_ms) FROM move_history WHERE latency_ms IS NOT NULL")
+            return s
         }
     }
 }
