@@ -72,11 +72,22 @@ public struct SnapshotEntry: Equatable, Sendable {
 public final class AppDatabase: @unchecked Sendable {
     public let queue: DatabaseQueue
 
-    public static func defaultURL() throws -> URL {
-        let dir = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appendingPathComponent("jev-folder-sort", isDirectory: true)
+    /// `~/Library/Application Support/jev-folder-sort`, or `$JEVSORT_DATA_DIR`
+    /// (used for testing so a test launch never touches the real app data).
+    public static func dataDirectory() throws -> URL {
+        let dir: URL
+        if let custom = ProcessInfo.processInfo.environment["JEVSORT_DATA_DIR"], !custom.isEmpty {
+            dir = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            dir = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appendingPathComponent("jev-folder-sort", isDirectory: true)
+        }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("app.sqlite")
+        return dir
+    }
+
+    public static func defaultURL() throws -> URL {
+        try dataDirectory().appendingPathComponent("app.sqlite")
     }
 
     public init(path: String) throws {

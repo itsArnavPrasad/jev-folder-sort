@@ -12,7 +12,8 @@ final class Fixture {
     var scope: ScopeConfig
 
     init(folders: [String] = ["Finance", "Finance/Taxes", "Photos", "Code"]) throws {
-        let base = NSTemporaryDirectory() + "jevsort-test-" + UUID().uuidString
+        // Fixtures live inside the repo (gitignored), never in the user's own folders.
+        let base = Self.fixtureRoot + "/test-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
         home = ScopePaths.canonical(base)!
         policy = ScopePolicy(home: home, deniedPrefixes: [home + "/Library"])
@@ -25,6 +26,10 @@ final class Fixture {
     }
 
     deinit { try? FileManager.default.removeItem(atPath: home) }
+
+    /// `<repo>/app/.test-fixtures`
+    static let fixtureRoot: String = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().appendingPathComponent("../../.test-fixtures").standardized.path
 
     var guardrail: ScopeGuard { ScopeGuard(config: scope, policy: policy) }
 

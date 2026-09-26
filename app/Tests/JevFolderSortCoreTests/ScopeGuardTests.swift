@@ -117,7 +117,7 @@ struct ScopeGuardTests {
     @Test func protectedAndTooBroadRootsAreRejected() throws {
         let fx = try Fixture()
         try FileManager.default.createDirectory(atPath: fx.home + "/Library/Mobile Documents", withIntermediateDirectories: true)
-        for root in [fx.home, fx.home + "/Library/Mobile Documents", "/", "/Users", NSTemporaryDirectory()] {
+        for root in [fx.home, fx.home + "/Library/Mobile Documents", "/", "/Users", Fixture.fixtureRoot] {
             var s = fx.scope
             s.root = ScopePaths.canonical(root)
             #expect(!s.issues(policy: fx.policy).isEmpty, "\(root) accepted as root")

@@ -11,3 +11,6 @@ engine/.cache/
 app/.build/
 app/.swiftpm/
 build/
+app/.test-fixtures/
+examples/demo/
+.jevsort-data/
