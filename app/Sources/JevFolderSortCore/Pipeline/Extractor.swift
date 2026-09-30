@@ -15,9 +15,13 @@ public struct FileState: Codable, Equatable, Sendable {
     public var authors: [String]?
     public var size: Int64?
     public var text: String?
+    /// macOS marks screenshots and screen recordings itself.
+    public var screenshot: Bool?
+    /// "Apple iPhone 15 Pro" for photos with camera metadata.
+    public var camera: String?
 
     enum CodingKeys: String, CodingKey {
-        case name, ext, kind, title, authors, size, text
+        case name, ext, kind, title, authors, size, text, screenshot, camera
         case contentType = "content_type"
         case whereFrom = "where_from"
     }
@@ -50,7 +54,17 @@ public struct Extractor: Sendable {
             state.whereFrom = (MDItemCopyAttribute(item, kMDItemWhereFroms) as? [String])?.filter { !$0.isEmpty }
             state.title = MDItemCopyAttribute(item, kMDItemTitle) as? String
             state.authors = MDItemCopyAttribute(item, kMDItemAuthors) as? [String]
+            if (MDItemCopyAttribute(item, "kMDItemIsScreenCapture" as CFString) as? Bool) == true {
+                state.screenshot = true
+            }
+            let make = MDItemCopyAttribute(item, kMDItemAcquisitionMake) as? String
+            let model = MDItemCopyAttribute(item, kMDItemAcquisitionModel) as? String
+            if let camera = [make, model].compactMap({ $0 }).joined(separator: " ").nilIfEmpty {
+                // Models often repeat the make ("Apple iPhone 15 Pro").
+                state.camera = model.map { m in make.map { m.hasPrefix($0) ? m : "\($0) \(m)" } ?? m } ?? camera
+            }
         }
+        if state.screenshot == nil, Self.hasScreenCaptureXattr(path) { state.screenshot = true }
         if state.contentType == nil {
             state.contentType = UTType(filenameExtension: ext)?.identifier
         }
@@ -64,6 +78,11 @@ public struct Extractor: Sendable {
         // Spotlight falls back to the file name when a document has no title.
         if let t = state.title, t == name || t == url.deletingPathExtension().lastPathComponent { state.title = nil }
         return state
+    }
+
+    /// Spotlight may not have indexed a brand-new file yet; the flag also lives in an xattr.
+    static func hasScreenCaptureXattr(_ path: String) -> Bool {
+        getxattr(path, "com.apple.metadata:kMDItemIsScreenCapture", nil, 0, 0, 0) > 0
     }
 
     func text(url: URL, ext: String, contentType: String?) -> String? {
@@ -106,4 +125,8 @@ public struct Extractor: Sendable {
         }
         return out
     }
+}
+
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

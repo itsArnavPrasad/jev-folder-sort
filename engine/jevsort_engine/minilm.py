@@ -12,9 +12,12 @@ needs, and what a from-scratch encoder can't learn from synthetic data.
 2. Structural embeddings (depth / sibling / path hash, which field a token came
    from) are added to MiniLM's input embeddings, initialised at zero so the model
    starts out as exactly MiniLM.
-3. Choice scores = the learned Choice head (zero-initialised) + a
-   **description-matching prior**: the learned-scale cosine similarity between
-   the file's mean-pooled embedding and each "Folder / Path: description" option.
+3. Choice scores = the learned Choice head (zero-initialised) + priors:
+   - a **description prior**: learned-scale cosine similarity between the file's
+     mean-pooled embedding and each "Folder / Path: description" option;
+   - a **keyword prior**: learned-scale log(1 + shared content words), which
+     catches names, clients and brands a sentence model is weak on;
+   - "none of these folders fit" gets a learned constant instead (v0.4).
    Plain-English descriptions work from step 0; training learns corrections.
 
 History and reasoning: docs/MODEL_HISTORY.md.
@@ -22,6 +25,7 @@ History and reasoning: docs/MODEL_HISTORY.md.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 import torch
@@ -29,6 +33,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from .decision import Choice, DecisionModel, ModelConfig, Noul
+from .state import NONE_OPTION, content_words, state_words
 
 CLS, SEP = 101, 102
 HIDDEN, LAYERS, HEADS, FFN, MAX_POS = 384, 6, 12, 1536, 512
@@ -184,6 +189,13 @@ class FolderModel(DecisionModel):
         self.text_encoder = MiniLMTextEncoder(self.bert)
         # Scale of the cosine-similarity prior (sentence-transformers cosines live in ~[-0.2, 0.9]).
         self.prior_scale = nn.Parameter(torch.tensor(20.0))
+        # "None of these folders fit" gets a learned constant instead of a cosine:
+        # MiniLM finds that sentence similar to almost any file, so a cosine would
+        # make "none" win close calls it shouldn't.
+        self.none_bias = nn.Parameter(torch.tensor(7.0))
+        # Keyword prior: shared content words between the file and each option
+        # (names, brands, clients: exactly where a sentence model is weakest).
+        self.lexical_scale = nn.Parameter(torch.tensor(1.5))
         # The learned Choice score starts at exactly 0, so an untrained model is
         # pure description matching; training learns corrections on top.
         nn.init.zeros_(self.choice_head.o_proj[1].weight)
@@ -209,6 +221,9 @@ class FolderModel(DecisionModel):
                 mask = torch.ones(B, len(q.options), dtype=torch.bool, device=vec.device)
                 learned = self.choice_head(vec, opts.unsqueeze(0).expand(B, -1, -1), mask)
                 prior = self.prior_scale * state_emb @ F.normalize(opts, dim=-1).T  # [B, K]
+                prior = prior + self.lexical_scale * lexical_overlap(states, q.options, prior.device)
+                is_none = torch.tensor([o == NONE_OPTION for o in q.options], device=prior.device)
+                prior = torch.where(is_none, self.none_bias.expand_as(prior), prior)
                 probs = F.softmax(learned + prior, dim=-1)
             else:
                 probs = self.score_head(vec, len(q.labels))
@@ -217,4 +232,14 @@ class FolderModel(DecisionModel):
         return out
 
 
-__all__ = ["FolderModel", "MiniLM", "mean_pool"]
+def lexical_overlap(states: Sequence, options: Sequence[str], device) -> Tensor:
+    """[B, K] log(1 + number of content words shared by each file and each option)."""
+    opt_words = [content_words(o) for o in options]
+    rows = []
+    for st in states:
+        w = state_words(st) if isinstance(st, dict) else content_words(str(st))
+        rows.append([math.log1p(len(w & ow)) for ow in opt_words])
+    return torch.tensor(rows, dtype=torch.float32, device=device)
+
+
+__all__ = ["FolderModel", "MiniLM", "mean_pool", "lexical_overlap"]

@@ -290,9 +290,9 @@ def make_group(rng: random.Random, n_files: int = 16) -> dict:
     files = []
     for _ in range(n_files):
         roll = rng.random()
-        if roll < 0.07:
+        if roll < 0.05:
             c = JUNK
-        elif in_tree and roll < 0.82:
+        elif in_tree and roll < 0.88:
             c = rng.choice(in_tree)
         else:
             c = rng.choice(CONCEPTS)

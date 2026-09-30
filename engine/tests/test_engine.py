@@ -121,3 +121,33 @@ def test_old_architecture_checkpoints_are_refused(sorter, tmp_path):
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     with pytest.raises(ValueError, match="only 'minilm'"):
         load_checkpoint(tmp_path, torch.device("cpu"))
+
+
+def test_lexical_overlap_matches_names_and_ignores_stopwords():
+    from jevsort_engine.minilm import lexical_overlap
+    from jevsort_engine.state import NONE_OPTION
+
+    state = model_state({"name": "INV-0107_Brightwave.pdf", "text": "Invoice for Brightwave Inc. Amount due"})
+    options = ["P-17: client Brightwave, contracts and invoices", "SRC: source code", NONE_OPTION]
+    ov = lexical_overlap([state], options, "cpu")[0]
+    assert ov[0] > 0 and ov[1] == 0 and ov[2] == 0
+
+
+def test_none_option_uses_learned_bias_not_similarity(sorter):
+    import torch
+
+    tree = parse_tree(TREE)
+    with torch.no_grad():
+        sorter.model.none_bias.fill_(50.0)
+        (d,) = sorter.distributions(tree, FILES[:1])
+        sorter.model.none_bias.fill_(-50.0)
+        (e,) = sorter.distributions(tree, FILES[:1])
+        sorter.model.none_bias.fill_(7.0)
+    assert d[NONE_ID] > 0.99 and e[NONE_ID] < 0.01
+
+
+def test_screenshot_and_camera_fold_into_kind():
+    st = model_state({"name": "a.png", "kind": "PNG image", "screenshot": True})
+    assert st["kind"] == "PNG image, screenshot"
+    st = model_state({"name": "IMG_1.HEIC", "kind": "HEIF Image", "camera": "Apple iPhone 15 Pro"})
+    assert st["kind"] == "HEIF Image, photo taken with Apple iPhone 15 Pro"

@@ -196,3 +196,21 @@ struct SupportTests {
         #expect(try db.scope().folders.count == 3)
     }
 }
+
+@Suite("Extractor")
+struct ExtractorTests {
+    @Test func screenshotFlagFromXattrAndTextLimit() throws {
+        let fx = try Fixture()
+        let shot = try fx.file("Inbox/shot.png", "x")
+        // What `screencapture` writes: a binary plist boolean true.
+        let plist = try PropertyListSerialization.data(fromPropertyList: true, format: .binary, options: 0)
+        _ = plist.withUnsafeBytes { setxattr(shot, "com.apple.metadata:kMDItemIsScreenCapture", $0.baseAddress, plist.count, 0, 0) }
+        #expect(Extractor(textLimitKB: 1).extract(path: shot).screenshot == true)
+
+        let big = try fx.file("Inbox/notes.txt", String(repeating: "word ", count: 2000))
+        let state = Extractor(textLimitKB: 1).extract(path: big)
+        #expect((state.text?.utf8.count ?? 0) <= 1024)
+        #expect(state.screenshot == nil)
+        #expect(Extractor(textLimitKB: 0).extract(path: big).text == nil)
+    }
+}

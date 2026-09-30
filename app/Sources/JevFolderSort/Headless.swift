@@ -6,6 +6,7 @@ import JevFolderSortCore
 ///   JEVSORT_DATA_DIR=<dir> JevFolderSort --headless [--demo <demoDir>] [--stub] [--preview]
 ///                                      [--sort] [--train] [--undo-last-run]
 ///                                      [--learn-from <root> [--per-folder N] [--apply-threshold]]
+///                                      [--descriptions <json>] [--threshold 0.9]
 ///
 /// `--demo` points the scope at <demoDir>/Inbox and <demoDir>/Sorted (all
 /// sub-folders allowed). Requires JEVSORT_DATA_DIR so it never touches the
@@ -58,6 +59,21 @@ enum Headless {
             scope.root = root
             scope.folders = FolderImport.folders(under: root, merging: scope.folders)
             try db.save(scope)
+        }
+        if let file = value(after: "--descriptions", in: args) {
+            // {"Finance/Taxes": "tax forms, IRS letters", ...} keyed by relative folder path.
+            let data = try Data(contentsOf: URL(fileURLWithPath: file))
+            let map = try require(try JSONSerialization.jsonObject(with: data) as? [String: String], "bad descriptions JSON")
+            var scope = try db.scope()
+            for i in scope.folders.indices {
+                if let d = map[scope.folders[i].relativePath] { scope.folders[i].description = d }
+            }
+            try db.save(scope)
+        }
+        if let t = value(after: "--threshold", in: args).flatMap(Double.init) {
+            var s = try db.settings()
+            s.confidenceThreshold = t
+            try db.save(s)
         }
         if let root = value(after: "--learn-from", in: args) {
             // Learn-only scope: every sub-folder of <root> is a label. Nothing is

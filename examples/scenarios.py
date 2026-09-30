@@ -1,0 +1,136 @@
+"""End-to-end scenarios: realistic folder setups, a messy Inbox, and the right answer for each file.
+
+Used by scripts/e2e_scenarios.sh, which builds each scenario inside the repo
+(examples/scenarios-out/, gitignored), runs the real app headless on it, and
+scores the result. Different people, vocabularies and folder styles from the
+model's training and eval data.
+
+File kinds: pdf (real PDF with text), docx, txt (any text/code file), png/jpg
+(real images, no text), empty (0-byte file, e.g. an installer placeholder).
+"expect" lists every acceptable folder; "NONE" means it should stay put.
+"""
+
+SCENARIOS = {
+    "student": {
+        "folders": {
+            "Semester 3/Algorithms": "CS 161 algorithms course: lecture slides, problem sets, exam prep",
+            "Semester 3/Econ": "Econ 102 macroeconomics: readings, essays, midterm",
+            "Admin": "university paperwork: tuition bills, financial aid, enrollment, housing",
+            "Money": "bank statements, receipts, Venmo and card stuff",
+            "Jobs": "resumes, cover letters, internship applications and offers",
+            "Pics": "photos from my phone",
+            "Screenshots": "screenshots",
+        },
+        "files": [
+            ("CS161_Lecture09_Graphs.pdf", "pdf", "CS 161 Lecture 9. Graph search: BFS, DFS, topological sort.", ["Semester 3/Algorithms"]),
+            ("ps4.pdf", "pdf", "Problem Set 4. Due Thursday 5pm. 1. Prove that Dijkstra's algorithm is correct.", ["Semester 3/Algorithms"]),
+            ("midterm_cheatsheet.docx", "docx", "Master theorem cases. Recurrences. Greedy exchange argument.", ["Semester 3/Algorithms"]),
+            ("Mankiw_ch12_reading.pdf", "pdf", "Chapter 12: Aggregate demand and aggregate supply. Monetary policy.", ["Semester 3/Econ"]),
+            ("econ_essay_inflation_draft.docx", "docx", "Essay: Is inflation always a monetary phenomenon? Introduction.", ["Semester 3/Econ"]),
+            ("Fall_tuition_statement.pdf", "pdf", "Office of the Registrar. Tuition and fees for Fall term. Balance due $6,210.", ["Admin"]),
+            ("FAFSA_confirmation.pdf", "pdf", "Federal Student Aid. Your FAFSA form has been processed. Expected family contribution.", ["Admin"]),
+            ("housing_assignment_2026.pdf", "pdf", "Residential Life. Your room assignment: Wilbur Hall 214.", ["Admin"]),
+            ("BofA_estatement_Oct.pdf", "pdf", "Bank of America Advantage Banking. Statement October. Ending balance $812.33.", ["Money"]),
+            ("chipotle_receipt.pdf", "pdf", "Chipotle Mexican Grill. Burrito bowl. Total $13.45. Visa.", ["Money"]),
+            ("resume_2026_swe.pdf", "pdf", "Sam Rivera. Computer Science. Experience: teaching assistant, hackathon winner. Skills: Python, C++.", ["Jobs"]),
+            ("Datadog_offer.pdf", "pdf", "We are excited to offer you a Software Engineering Intern position. Compensation.", ["Jobs"]),
+            ("cover_letter_figma.docx", "docx", "Dear Figma recruiting team, I am applying for the Summer 2026 internship.", ["Jobs"]),
+            ("IMG_7712.jpg", "jpg", "", ["Pics"]),
+            ("IMG_7713.jpg", "jpg", "", ["Pics"]),
+            ("Screenshot 2026-09-12 at 11.02.33 PM.png", "png", "", ["Screenshots"]),
+            ("Screenshot 2026-09-20 at 08.15.00 AM.png", "png", "", ["Screenshots"]),
+            ("zoom_installer.pkg", "empty", "", ["NONE"]),
+            ("untitled.txt", "txt", "asdfgh", ["NONE"]),
+        ],
+    },
+    "freelance_designer": {
+        "folders": {
+            "Clients/Northwind": "client Northwind Coffee: contracts, briefs, invoices and deliverables for them",
+            "Clients/Kestrel": "client Kestrel Bikes: everything for the Kestrel website project",
+            "Business/Invoices sent": "invoices I send to clients",
+            "Business/Taxes": "my self-employment taxes, VAT returns, accountant letters",
+            "Business/Expenses": "receipts for software, equipment and business costs",
+            "Assets/Fonts": "font files",
+            "Assets/Stock": "stock photos and illustrations I downloaded",
+            "Personal": "personal documents unrelated to work",
+        },
+        "files": [
+            ("Northwind_SOW_signed.pdf", "pdf", "Statement of Work between Alex Kim Studio and Northwind Coffee Co. Brand refresh. Signed.", ["Clients/Northwind"]),
+            ("northwind_brief_packaging.docx", "docx", "Northwind Coffee packaging brief. Audience, tone, deliverables: 3 bag designs.", ["Clients/Northwind"]),
+            ("Kestrel_sitemap_v2.pdf", "pdf", "Kestrel Bikes website. Sitemap: home, shop, dealers, about.", ["Clients/Kestrel"]),
+            ("kestrel_feedback_round1.txt", "txt", "Kestrel feedback: make the hero image bigger, change CTA to Find a dealer.", ["Clients/Kestrel"]),
+            ("INV-2026-031.pdf", "pdf", "INVOICE 2026-031. Bill to: Kestrel Bikes Ltd. Website design milestone 2. Total £3,400.", ["Business/Invoices sent", "Clients/Kestrel"]),
+            ("INV-2026-032.pdf", "pdf", "INVOICE 2026-032. Bill to: Northwind Coffee Co. Packaging design. Total £2,150.", ["Business/Invoices sent", "Clients/Northwind"]),
+            ("VAT_return_Q3.pdf", "pdf", "HM Revenue & Customs. VAT return for period July to September. VAT due.", ["Business/Taxes"]),
+            ("accountant_letter_self_assessment.pdf", "pdf", "Dear Alex, your self assessment tax return for 2025-26 is ready for review.", ["Business/Taxes"]),
+            ("Adobe_CC_receipt_Sep.pdf", "pdf", "Adobe. Receipt. Creative Cloud All Apps. £56.98. Thank you for your payment.", ["Business/Expenses"]),
+            ("apple_store_macbook_receipt.pdf", "pdf", "Apple Store receipt. MacBook Pro 14-inch. Total £1,999.", ["Business/Expenses"]),
+            ("SpaceGrotesk-Bold.otf", "empty", "", ["Assets/Fonts"]),
+            ("Satoshi-Variable.ttf", "empty", "", ["Assets/Fonts"]),
+            ("unsplash_mountain_lake.jpg", "jpg", "", ["Assets/Stock"]),
+            ("passport_renewal_form.pdf", "pdf", "HM Passport Office. Application to renew your passport. Applicant details.", ["Personal"]),
+            ("dentist_appointment.pdf", "pdf", "Smile Dental. Appointment confirmation for Alex Kim, 3 October at 2pm.", ["Personal"]),
+            ("Screenshot 2026-09-25 at 16.40.12.png", "png", "", ["NONE", "Clients/Kestrel", "Clients/Northwind"]),
+            ("download.bin", "empty", "", ["NONE"]),
+        ],
+    },
+    "family_admin": {
+        "folders": {
+            "Home": "the house: mortgage, council tax, energy and water bills, repairs, home insurance",
+            "Car": "car insurance, MOT, servicing, parking tickets",
+            "Kids/Ella": "our daughter Ella: school reports, trips, doctor and dentist letters",
+            "Kids/Noah": "our son Noah: nursery, swimming, doctor letters",
+            "Health": "my and my partner's medical letters and prescriptions",
+            "Travel": "holiday bookings, flights, hotels, passports scans for trips",
+            "Recipes": "recipes and meal plans",
+            "Work": "my employment: payslips, contract, P60",
+        },
+        "files": [
+            ("british_gas_bill_sept.pdf", "pdf", "British Gas. Your energy bill for September. Gas and electricity. Amount due £142.80.", ["Home"]),
+            ("council_tax_2026.pdf", "pdf", "Council Tax bill 2026/27. Band C. Annual amount £1,812.", ["Home"]),
+            ("boiler_service_invoice.pdf", "pdf", "Boiler service completed. Invoice £95. Next service due in 12 months.", ["Home"]),
+            ("admiral_car_insurance.pdf", "pdf", "Admiral car insurance renewal. Vauxhall Corsa. Annual premium £488.", ["Car"]),
+            ("MOT_result.pdf", "pdf", "MOT test result: pass. Advisories: front tyres wearing.", ["Car"]),
+            ("ella_school_report_summer.pdf", "pdf", "St Mary's Primary. End of year report for Ella. Maths: exceeding expectations.", ["Kids/Ella"]),
+            ("ella_trip_letter.pdf", "pdf", "Year 4 residential trip. Ella's consent form and kit list.", ["Kids/Ella"]),
+            ("noah_swimming_certificate.pdf", "pdf", "Congratulations Noah! Stage 2 swimming certificate.", ["Kids/Noah"]),
+            ("nursery_invoice_oct.pdf", "pdf", "Little Acorns Nursery. October fees for Noah. £640.", ["Kids/Noah", "Home"]),
+            ("GP_letter_blood_test.pdf", "pdf", "Dear Mrs Shah, your recent blood test results are normal.", ["Health"]),
+            ("prescription_reminder.txt", "txt", "Repeat prescription due: lisinopril 10mg. Collect from pharmacy.", ["Health"]),
+            ("ryanair_booking_malaga.pdf", "pdf", "Ryanair booking confirmation. London Stansted to Malaga. 4 passengers.", ["Travel"]),
+            ("hotel_malaga_confirmation.pdf", "pdf", "Booking.com confirmation. Hotel Molina Lario, Malaga. 5 nights.", ["Travel"]),
+            ("lentil_soup.txt", "txt", "Red lentil soup: onion, carrot, cumin, red lentils, stock. 30 minutes.", ["Recipes"]),
+            ("payslip_september.pdf", "pdf", "Payslip September. Gross pay £3,850. Tax. National Insurance. Net pay.", ["Work"]),
+            ("P60_2025_26.pdf", "pdf", "P60 End of Year Certificate 2025-26. Total pay in this employment.", ["Work"]),
+            ("IMG_2231.jpg", "jpg", "", ["NONE"]),
+        ],
+    },
+    "developer": {
+        "folders": {
+            "Projects/api-server": "backend service in TypeScript: source, configs, SQL migrations",
+            "Projects/ml-experiments": "python notebooks, training scripts and datasets for ML experiments",
+            "Installers": "dmg and pkg installers",
+            "Docs to read": "papers, articles and ebooks to read later",
+            "Keys & configs": "dotfiles, SSH keys, env files, config backups",
+            "Screenshots": "screenshots",
+        },
+        "files": [
+            ("routes.ts", "txt", "import { Router } from 'express'\nconst router = Router()\nrouter.get('/users/:id', getUser)", ["Projects/api-server"]),
+            ("003_add_orders_table.sql", "txt", "CREATE TABLE orders (id serial primary key, user_id int references users(id));", ["Projects/api-server"]),
+            ("docker-compose.yml", "txt", "services:\n  api:\n    build: .\n  postgres:\n    image: postgres:16", ["Projects/api-server", "Keys & configs"]),
+            ("train_resnet.py", "txt", "import torch\nfrom torchvision.models import resnet18\nmodel = resnet18()\nfor epoch in range(10):", ["Projects/ml-experiments"]),
+            ("eda.ipynb", "txt", '{"cells": [{"cell_type": "code", "source": ["import pandas as pd\\n", "df = pd.read_csv(\'train.csv\')"]}]}', ["Projects/ml-experiments"]),
+            ("train.csv", "txt", "id,label,feature_1,feature_2\n1,0,0.23,1.9\n2,1,0.87,0.2", ["Projects/ml-experiments"]),
+            ("Docker.dmg", "empty", "", ["Installers"]),
+            ("Postman-osx-arm64.pkg", "empty", "", ["Installers"]),
+            ("2405.00123v1.pdf", "pdf", "Abstract. We introduce a method for efficient long-context attention. 1 Introduction.", ["Docs to read"]),
+            ("Designing_Data_Intensive_Applications.epub", "empty", "", ["Docs to read"]),
+            ("id_ed25519_github.pub", "txt", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGx user@laptop", ["Keys & configs"]),
+            ("zshrc_backup.txt", "txt", "export PATH=\"$HOME/.local/bin:$PATH\"\nalias gs='git status'", ["Keys & configs"]),
+            ("prod.env", "txt", "DATABASE_URL=postgres://prod\nSTRIPE_KEY=sk_live_123", ["Keys & configs", "Projects/api-server"]),
+            ("Screenshot 2026-09-29 at 10.10.10.png", "png", "", ["Screenshots"]),
+            ("CleanShot 2026-09-28 at 14.22.01@2x.png", "png", "", ["Screenshots"]),
+            ("meeting_notes.txt", "txt", "1:1 with manager. Promotion timeline. Q4 goals.", ["NONE", "Docs to read"]),
+        ],
+    },
+}

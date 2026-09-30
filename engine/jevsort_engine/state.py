@@ -48,10 +48,17 @@ def model_state(raw: dict) -> dict:
     ext = str(raw.get("ext") or (name.rsplit(".", 1)[1] if "." in name else "")).lower()
     sources = [d for d in (domain(u) for u in raw.get("where_from") or []) if d]
     text = _WS.sub(" ", str(raw.get("text") or "")).strip()[:MAX_TEXT_CHARS]
+    kind = str(raw.get("kind") or "")
+    # Strong, cheap signals macOS already knows: fold them into the kind so the
+    # model reads e.g. "PNG image, screenshot" or "JPEG image, photo taken with Apple iPhone 15".
+    if raw.get("screenshot"):
+        kind = f"{kind}, screenshot" if kind else "screenshot"
+    if raw.get("camera"):
+        kind = f"{kind}, photo taken with {raw['camera']}" if kind else f"photo taken with {raw['camera']}"
     state = {
         "name": humanize(name),
         "ext": ext,
-        "kind": str(raw.get("kind") or ""),
+        "kind": kind,
         "source": " ".join(dict.fromkeys(sources)),
         "title": str(raw.get("title") or ""),
         "text": text,
@@ -70,3 +77,29 @@ def parse_tree(items: list[dict]) -> list[Folder]:
     if not folders:
         raise ValueError("tree must contain at least one folder")
     return folders
+
+
+# --- lexical overlap (hybrid keyword + semantic matching) -------------------
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "this", "that", "are", "was", "all", "any", "anything", "files", "file",
+    "folder", "folders", "stuff", "things", "other", "misc", "like", "about", "related", "everything", "here",
+    "put", "only", "nothing", "else", "our", "my", "mine", "your", "their", "his", "her", "its", "you", "etc",
+    "name", "ext", "kind", "source", "title", "text", "document", "documents", "pdf", "none", "these", "fit",
+}
+
+
+def _stem(w: str) -> str:
+    for suffix in ("ies", "es", "s"):
+        if w.endswith(suffix) and len(w) > len(suffix) + 2:
+            return w[: -len(suffix)] + ("y" if suffix == "ies" else "")
+    return w
+
+
+def content_words(text: str) -> set[str]:
+    return {_stem(w) for w in _WORD_RE.findall(text.lower()) if len(w) > 2 and w not in _STOPWORDS}
+
+
+def state_words(state: dict) -> set[str]:
+    return content_words(" ".join(str(v) for v in state.values()))

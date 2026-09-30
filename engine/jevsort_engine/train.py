@@ -19,6 +19,7 @@ from pathlib import Path
 import torch
 
 from datasets.eval import dev as dev_set
+from datasets.eval import scenarios as scenario_set
 from datasets.generate import augment, make_group
 
 from .eval import eval_cases, evaluate, format_report
@@ -63,21 +64,29 @@ def main() -> None:
     p.add_argument("--files", type=int, default=16, help="files per tree (batch size)")
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--encoder-lr", type=float, default=2e-5)
+    p.add_argument("--init", type=Path, help="warm-start from this checkpoint")
     p.add_argument("--warmup", type=int, default=300)
     p.add_argument("--eval-every", type=int, default=250)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=Path, default=Path("checkpoints/base"))
-    p.add_argument("--version", default="minilm-0.3.0")
+    p.add_argument("--version", default="minilm-0.4.0")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     val_rng = random.Random(10_000 + args.seed)
     val_groups = [make_group(val_rng, args.files) for _ in range(40)]
-    dev_cases = eval_cases(dev_set)
+    dev_cases = eval_cases(dev_set) + eval_cases(scenario_set)
 
     device = pick_device()
-    model = build_model().to(device).train()
+    if args.init:
+        from .model import load_checkpoint as _load
+
+        model, init_meta = _load(args.init, device, allow_new=True)
+        model.train()
+        print(f"warm start from {args.init} ({init_meta.get('version')})", flush=True)
+    else:
+        model = build_model().to(device).train()
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model: {n_params / 1e6:.1f}M params on {device}", flush=True)
 

@@ -67,7 +67,13 @@ def save_checkpoint(model: FolderModel, directory: Path, meta: dict) -> None:
     (directory / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
-def load_checkpoint(directory: Path, device: torch.device | None = None) -> tuple[FolderModel, dict]:
+NEW_IN_V04 = ("none_bias", "lexical_scale")  # parameters added after minilm-0.3.0
+
+
+def load_checkpoint(directory: Path, device: torch.device | None = None,
+                    allow_new: bool = True) -> tuple[FolderModel, dict]:
+    """Load a checkpoint. A minilm-0.3.x checkpoint predates the parameters in
+    NEW_IN_V04; with `allow_new` they keep their initial values."""
     raw = json.loads((directory / "config.json").read_text())
     arch = raw.pop("arch", "jev")
     if arch != ARCH:
@@ -76,7 +82,8 @@ def load_checkpoint(directory: Path, device: torch.device | None = None) -> tupl
     weights = {k: v.float() for k, v in load_file(str(directory / "model.safetensors")).items()}
     model.load_state_dict(weights, strict=False)
     missing = [k for k in model.state_dict() if k not in weights
-               and not k.startswith(("text_encoder.", "state_encoder.bert."))]
+               and not k.startswith(("text_encoder.", "state_encoder.bert."))
+               and not (allow_new and k in NEW_IN_V04)]
     if missing:
         raise ValueError(f"checkpoint is missing {missing[:3]}")
     meta = json.loads((directory / "meta.json").read_text())
