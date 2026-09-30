@@ -5,6 +5,9 @@ Used by scripts/e2e_scenarios.sh, which builds each scenario inside the repo
 scores the result. Different people, vocabularies and folder styles from the
 model's training and eval data.
 
+"existing" (optional) are files already sorted into folders before the app
+starts, used to test "Learn from my folders" (e2e_scenarios.py --learn).
+
 File kinds: pdf (real PDF with text), docx, txt (any text/code file), png/jpg
 (real images, no text), empty (0-byte file, e.g. an installer placeholder).
 "expect" lists every acceptable folder; "NONE" means it should stay put.
@@ -44,6 +47,18 @@ SCENARIOS = {
         ],
     },
     "freelance_designer": {
+        "existing": [
+            ("Clients/Northwind", "northwind_logo_brief.pdf", "pdf", "Northwind Coffee logo brief. Warm, crafted, independent."),
+            ("Clients/Northwind", "northwind_contract_2025.pdf", "pdf", "Design services agreement. Northwind Coffee Co. Signed."),
+            ("Clients/Kestrel", "kestrel_wireframes.pdf", "pdf", "Kestrel Bikes wireframes. Homepage, product page."),
+            ("Clients/Kestrel", "kestrel_kickoff_notes.txt", "txt", "Kestrel kickoff: launch before spring, dealer map is key."),
+            ("Business/Invoices sent", "INV-2026-029.pdf", "pdf", "INVOICE 2026-029. Bill to: Northwind Coffee Co. Total £1,800."),
+            ("Business/Invoices sent", "INV-2026-030.pdf", "pdf", "INVOICE 2026-030. Bill to: Kestrel Bikes Ltd. Total £2,600."),
+            ("Business/Taxes", "self_assessment_2024_25.pdf", "pdf", "HMRC self assessment tax calculation 2024-25."),
+            ("Business/Expenses", "figma_invoice_aug.pdf", "pdf", "Figma. Invoice. Professional plan. £12."),
+            ("Business/Expenses", "wacom_receipt.pdf", "pdf", "Wacom Intuos Pro tablet. Receipt £329."),
+            ("Personal", "gym_membership.pdf", "pdf", "PureGym membership confirmation for Alex Kim."),
+        ],
         "folders": {
             "Clients/Northwind": "client Northwind Coffee: contracts, briefs, invoices and deliverables for them",
             "Clients/Kestrel": "client Kestrel Bikes: everything for the Kestrel website project",
@@ -75,6 +90,22 @@ SCENARIOS = {
         ],
     },
     "family_admin": {
+        "existing": [
+            ("Home", "octopus_energy_aug.pdf", "pdf", "Octopus Energy. Electricity statement August. Amount due £88.10."),
+            ("Home", "thames_water_2026.pdf", "pdf", "Thames Water. Your water bill. Annual charges."),
+            ("Home", "mortgage_statement_2025.pdf", "pdf", "Nationwide mortgage annual statement. Balance outstanding."),
+            ("Car", "vauxhall_service_record.pdf", "pdf", "Vauxhall Corsa service. Oil and filter change. Brake check."),
+            ("Car", "parking_fine_paid.pdf", "pdf", "Penalty charge notice paid. Thank you."),
+            ("Kids/Ella", "ella_parents_evening.pdf", "pdf", "Parents' evening notes for Ella. Reading age above average."),
+            ("Kids/Ella", "ella_dentist.pdf", "pdf", "Dentist letter: Ella's check-up, no fillings needed."),
+            ("Kids/Noah", "noah_nursery_newsletter.pdf", "pdf", "Little Acorns Nursery newsletter. Noah's class: Hedgehogs."),
+            ("Kids/Noah", "noah_vaccination.pdf", "pdf", "Noah's pre-school booster vaccination record."),
+            ("Health", "physio_letter.pdf", "pdf", "Physiotherapy referral for lower back pain. Mrs Shah."),
+            ("Travel", "easyjet_lisbon_2025.pdf", "pdf", "easyJet booking. Gatwick to Lisbon. 4 passengers."),
+            ("Recipes", "pancakes.txt", "txt", "Pancakes: flour, eggs, milk, pinch of salt."),
+            ("Work", "payslip_august.pdf", "pdf", "Payslip August. Gross pay £3,850. Net pay £2,960."),
+            ("Work", "employment_contract.pdf", "pdf", "Contract of employment. Job title: Project Manager."),
+        ],
         "folders": {
             "Home": "the house: mortgage, council tax, energy and water bills, repairs, home insurance",
             "Car": "car insurance, MOT, servicing, parking tickets",

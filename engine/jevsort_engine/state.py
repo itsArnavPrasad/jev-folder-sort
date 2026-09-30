@@ -43,12 +43,44 @@ def domain(url: str) -> str:
     return host.removeprefix("www.")
 
 
+# Plain-English kinds for common extensions. Used when macOS only says
+# "Document" (or nothing): a sentence model can match "SQL database script" to a
+# folder described as "SQL migrations", but not the bare word "Document".
+EXT_KINDS = {
+    "sql": "SQL database script", "py": "Python source code", "js": "JavaScript source code",
+    "ts": "TypeScript source code", "tsx": "TypeScript React source code", "jsx": "React source code",
+    "swift": "Swift source code", "go": "Go source code", "rs": "Rust source code", "java": "Java source code",
+    "kt": "Kotlin source code", "rb": "Ruby source code", "php": "PHP source code", "c": "C source code",
+    "cpp": "C++ source code", "h": "C header file", "cs": "C# source code", "sh": "shell script",
+    "zsh": "shell script", "ipynb": "Jupyter notebook", "r": "R script", "m": "source code",
+    "yml": "YAML configuration file", "yaml": "YAML configuration file", "toml": "TOML configuration file",
+    "json": "JSON data file", "jsonl": "JSON lines data file", "xml": "XML file", "csv": "CSV spreadsheet data",
+    "tsv": "tab-separated data", "parquet": "Parquet dataset", "sqlite": "SQLite database", "db": "database file",
+    "env": "environment variables config file", "pem": "certificate or private key", "pub": "SSH public key",
+    "key": "Keynote presentation", "dmg": "macOS disk image installer", "pkg": "macOS installer package",
+    "exe": "Windows installer program", "msi": "Windows installer package", "app": "application",
+    "zip": "ZIP archive", "rar": "RAR archive", "7z": "7-Zip archive", "gz": "compressed archive",
+    "otf": "OpenType font file", "ttf": "TrueType font file", "woff": "web font file", "woff2": "web font file",
+    "epub": "ebook", "mobi": "Kindle ebook", "azw3": "Kindle ebook", "psd": "Photoshop design file",
+    "ai": "Illustrator design file", "fig": "Figma design file", "sketch": "Sketch design file",
+    "svg": "SVG vector graphic", "heic": "photo", "dng": "raw camera photo", "cr2": "raw camera photo",
+    "mp3": "music audio file", "m4a": "audio recording", "wav": "audio file", "flac": "lossless music file",
+    "mp4": "video", "mov": "video", "mkv": "video", "ics": "calendar invite", "vcf": "contact card",
+    "eml": "email message", "pkpass": "Apple Wallet pass (ticket or boarding pass)", "gpx": "GPS track",
+    "pt": "PyTorch model checkpoint", "safetensors": "machine learning model weights", "ckpt": "model checkpoint",
+    "log": "log file", "bin": "binary data file", "dat": "data file", "tmp": "temporary file",
+}
+GENERIC_KINDS = {"", "document", "unix executable file", "data", "unknown", "file"}
+
+
 def model_state(raw: dict) -> dict:
     name = str(raw.get("name", ""))
     ext = str(raw.get("ext") or (name.rsplit(".", 1)[1] if "." in name else "")).lower()
     sources = [d for d in (domain(u) for u in raw.get("where_from") or []) if d]
     text = _WS.sub(" ", str(raw.get("text") or "")).strip()[:MAX_TEXT_CHARS]
     kind = str(raw.get("kind") or "")
+    if kind.lower() in GENERIC_KINDS and ext in EXT_KINDS:
+        kind = EXT_KINDS[ext]
     # Strong, cheap signals macOS already knows: fold them into the kind so the
     # model reads e.g. "PNG image, screenshot" or "JPEG image, photo taken with Apple iPhone 15".
     if raw.get("screenshot"):

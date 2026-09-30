@@ -49,6 +49,8 @@ def build(name: str, spec: dict) -> Path:
         (root / "Sorted" / folder).mkdir(parents=True, exist_ok=True)
     for fname, kind, text, _ in spec["files"]:
         make_file(root / "Inbox" / fname, kind, text)
+    for folder, fname, kind, text in spec.get("existing", []):
+        make_file(root / "Sorted" / folder / fname, kind, text)
     (root / "descriptions.json").write_text(json.dumps(spec["folders"], indent=2))
     return root
 
@@ -59,7 +61,10 @@ def run(app: Path, root: Path, threshold: float, learn: bool) -> dict:
     base = [str(app), "--headless", "--demo", str(root), "--descriptions", str(root / "descriptions.json"),
             "--threshold", str(threshold)]
     if learn:
-        subprocess.run(base + ["--train"], env=env, capture_output=True, check=True)
+        t = subprocess.run(base + ["--train"], env=env, capture_output=True, text=True, check=True)
+        report = json.loads(t.stdout).get("train", {})
+        print(f"    learned: {report.get('examples')} examples, activated={report.get('activated')}, "
+              f"held-out {report.get('new_accuracy')} vs {report.get('current_accuracy')} ({report.get('reason', '')})")
     r = subprocess.run(base + ["--sort"], env=env, capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 

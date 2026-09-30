@@ -2,7 +2,7 @@
 
 jev-folder-sort's model went through four designs. Each change was driven by numbers on hand-written held-out files. This page records what we tried, what we measured, and why we ended up where we are.
 
-**Today (v0.3):** a pretrained **MiniLM** sentence encoder plus a **System One decision head** (typed Choice, read-out slots, calibrated confidence), with a description-matching prior. It's our own code in `engine/jevsort_engine/` and has no dependency on open-jev.
+**Today (v0.4):** a pretrained **MiniLM** sentence encoder plus a **System One decision head** (typed Choice, read-out slots, calibrated confidence), with a description-matching prior. It's our own code in `engine/jevsort_engine/` and has no dependency on open-jev.
 
 ## The idea we started from: TypeSafe's Jev
 
@@ -46,6 +46,23 @@ After v0.3, our model used only a few of open-jev's pieces: the typed question d
 
 The parameter names are unchanged, so the trained checkpoint loads identically: we got the same scores before and after removal. Checkpoints from the old from-scratch architecture (v0.1/v0.2) are no longer supported.
 
+## v0.4: fixing what real folders exposed
+
+An end-to-end scenario benchmark (four realistic setups, run through the real app) showed three problems:
+1. The model said "none of these fit" too often.
+2. It missed names and brands.
+3. It was weak on code files.
+
+The fixes:
+- **"None" gets a learned constant.** Previously it got a cosine similarity, and MiniLM finds the sentence "none of these folders fit this file" similar to almost anything.
+- **A learned keyword-overlap prior** alongside the semantic one: hybrid matching, as in modern search.
+- **Readable kinds for common extensions** when macOS only says "Document".
+- A warm-started fine-tune.
+
+The results:
+- Held-out: 77% → 83% (messy) and 85% → 94% (plain-English).
+- End to end: 52% → 64% of files auto-moved, with zero wrong moves.
+
 ## We also evaluated Laya
 
 [Laya](https://github.com/NandhaKishorM/laya) (Apache-2.0) is a pretrained, multilingual System One decision engine with Jev-style `choice`, `score` and `noul` questions.
@@ -70,7 +87,8 @@ As a second opinion on files our model is unsure about, Laya was confident *and*
 | base-0.1.0 (open-jev) | 61.3% | 52.8% | — |
 | base-0.2.0 (open-jev) | 57.3% | 50.9% | 56.7% |
 | MiniLM, zero training | 62.7% | 79.2% | 65.0% |
-| **minilm-0.3.0** | **77.3%** | **84.9%** | 80.0% |
+| minilm-0.3.0 | 77.3% | 84.9% | 80.0% |
+| **minilm-0.4.0** (keyword prior, learned "none", readable kinds) | **82.7%** | **94.3%** | 85.0% |
 | Laya zero-shot (best setting) | 34.0% | 50.9% | 50.0% |
 
 Details, thresholds and calibration are in [MODEL.md](MODEL.md).

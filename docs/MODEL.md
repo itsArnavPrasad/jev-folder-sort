@@ -2,7 +2,7 @@
 
 One question per file: **"Which of these folders does this file belong in?"** It's answered in one forward pass, on this Mac, as a probability over *your* allowed folders plus **"none of these folders fit"**. The model can't name a folder that isn't in your list, and it never sees a path.
 
-Current checkpoint: **`minilm-0.3.0`**, 32.8M parameters, ~60 MB, 4–7 ms per file on CPU. How we got here: [MODEL_HISTORY.md](MODEL_HISTORY.md).
+Current checkpoint: **`minilm-0.4.0`**, 32.8M parameters, ~60 MB, 4–7 ms per file on CPU. How we got here: [MODEL_HISTORY.md](MODEL_HISTORY.md).
 
 ## What it sees
 
@@ -40,6 +40,9 @@ folder options ─► same MiniLM ─► option embeddings ───────
   - an evidential confidence head;
   - trained with the RLCD loss (soft NLL + Brier + consistency + evidential + ECE) for calibrated probabilities.
 - **Description prior:** a learned-scale cosine similarity between the file and each option. It's why plain-English descriptions work immediately and can't be "trained away".
+- **Keyword prior (v0.4):** learned-scale log(1 + content words shared by the file and the option). It catches client names, people and brands ("Brightwave", "Ella"), which a sentence model is weakest on.
+- **"None of these" (v0.4):** a learned constant score. MiniLM rates the sentence "none of these folders fit this file" as similar to almost any file, so giving it a cosine made "none" win close calls.
+- **File kinds:** when macOS only says "Document", the extension becomes a readable kind ("SQL database script", "OpenType font file", "macOS installer package"). The macOS screenshot flag and camera make/model are appended too ("PNG image, screenshot").
 - **Confidence:** `confidence` is the top probability. The app moves a file only if it's at or above your threshold (default 90%) *and* the answer isn't `none`; otherwise the file waits in Review.
 
 ## Training (`train.py`, `datasets/`)
@@ -65,13 +68,15 @@ Two hand-written held-out sets, using brands, languages (German) and phrasing th
 - **messy** (150 files): three realistic trees (student, freelancer, minimal with descriptions).
 - **plain_english** (53 files): folder names that mean nothing ("Box 5", "Maya", "P-17"). Only the description says what goes there.
 
-**minilm-0.3.0** (step 1,000):
+**minilm-0.4.0** (warm-started from 0.3.0; selected on dev + scenarios):
 
 | | top-1 | ECE | Auto-moved @0.75 | Precision @0.75 | Auto-moved @0.9 | Precision @0.9 | Wrong moves @0.9 |
 |---|---|---|---|---|---|---|---|
-| messy | **77.3%** | 0.056 | 55.3% | 95.2% | 37.3% | 96.4% | 1.3% |
-| plain_english | **84.9%** | 0.125 | 66.0% | 97.1% | 52.8% | **100%** | 0.0% |
-| dev (selection) | 80.0% | 0.047 | 48.3% | 100% | 36.7% | 100% | 0.0% |
+| messy (held-out) | **82.7%** | 0.057 | 64% | 94.8% | 52% | 97.4% | 1.3% |
+| plain_english (held-out) | **94.3%** | 0.047 | 74% | 97.4% | 60% | 96.9% | 1.9% |
+| dev (selection) | 85.0% | 0.058 | — | — | 50% | 100% | 0% |
+
+For comparison, minilm-0.3.0 scored 77.3% and 84.9% on the two held-out sets.
 
 "Wrong moves" is the share of *all* files the app would move to an unacceptable folder at that threshold. Everything else is either moved correctly or left in Review.
 
@@ -81,6 +86,21 @@ Comparison, including the earlier open-jev models and Laya zero-shot: [MODEL_HIS
 - At the default 90% threshold, a third to a half of files move automatically, and almost none go to the wrong place.
 - The rest wait in Review with the model's top suggestions.
 - Good folder descriptions and "Learn from my folders" raise the automatic share.
+
+### End-to-end, through the real app
+
+`scripts/e2e_scenarios.py` covers four realistic setups (student, freelance designer, family admin, developer; 69 files). For each one it:
+1. builds real PDFs, DOCX files, images and code files inside the repo;
+2. gives each folder a plain-English description;
+3. runs the app headless at the default 90% threshold.
+
+The scenarios were also used for checkpoint selection, so treat these as development numbers.
+
+| | Auto-moved | Wrong moves | Left correctly ("none") | To Review | First choice right |
+|---|---|---|---|---|---|
+| minilm-0.3.0 | 36/69 (52%) | **0** | 4 | 29 | 61/69 (88%) |
+| **minilm-0.4.0** | **44/69 (64%)** | **0** | 4 | 21 | **65/69 (94%)** |
+| + Learn from my folders (2 scenarios, 10–14 pre-sorted files each) | 21/34 (62%) vs 19/34 without | 0 | 2 | 11 | 32/34 |
 
 ## Personalisation (`personalize.py`)
 
