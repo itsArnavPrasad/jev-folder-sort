@@ -1,10 +1,7 @@
-"""Pretrained WordPiece tokenizer that plugs into open-jev.
+"""WordPiece tokenizer of sentence-transformers/all-MiniLM-L6-v2 (Apache-2.0).
 
-open-jev's `Jev(cfg, tokenizer=...)` only needs `encode`, `encode_batch` and a
-`PAD` id, so we can swap its placeholder `HashTokenizer` for a real subword
-vocabulary without touching the vendored code. We use the vocabulary of
-sentence-transformers/all-MiniLM-L6-v2 (Apache-2.0) so the token embeddings can
-be initialised from that model's pretrained word embeddings.
+The model needs `encode`, `encode_batch` and a `PAD` id. The vocabulary is
+bundled as assets/minilm-tokenizer.json so nothing is downloaded at runtime.
 """
 
 from __future__ import annotations

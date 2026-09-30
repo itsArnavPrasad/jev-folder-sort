@@ -4,7 +4,7 @@
 
 jev-folder-sort is a native macOS menu-bar app that keeps folders like Desktop and Downloads tidy. You define a folder structure (the "destination tree"); every few minutes the app checks the folders it watches, and moves any new or changed files into the right place in that tree.
 
-Every decision is made **on-device** by a small System One decision model built on [open-jev](https://github.com/kyegomez/open-jev), an open-source PyTorch reconstruction of TypeSafe AI's Jev. No file content, filename or metadata ever leaves the Mac.
+Every decision is made **on-device** by a small System One decision model (pretrained MiniLM encoder + typed decision head; history in [MODEL_HISTORY.md](MODEL_HISTORY.md)), inspired by TypeSafe AI's Jev. No file content, filename or metadata ever leaves the Mac.
 
 ## 2. Who it is for
 
@@ -115,7 +115,7 @@ The model adapts to the user, locally. The app **reads** (never moves) files ins
 ### 5.10 Platform and distribution
 - macOS 14 Sonoma or later, **Apple Silicon first** (Intel best-effort, not tested for v1).
 - Distributed as a signed, notarized **`.dmg` on GitHub Releases**. No Homebrew or Mac App Store in v1.
-- Open source under **Apache-2.0** (same as open-jev).
+- Open source under **Apache-2.0**.
 
 ## 6. Out of scope for v1
 

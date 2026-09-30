@@ -4,7 +4,7 @@
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | ✅ **Engine spike** | Vendored open-jev runs locally (CPU, MPS optional); pretrained tokenizer swapped in; `classify` works over the stdin/stdout protocol |
+| M0 | ✅ **Engine spike** | (Historical: vendored open-jev, since replaced by our own model, see MODEL_HISTORY.md) runs locally (CPU, MPS optional); pretrained tokenizer swapped in; `classify` works over the stdin/stdout protocol |
 | M1 | ✅ **Base model** | Synthetic dataset + training script; base checkpoint beats a filename-keyword baseline on the held-out eval; ECE measured |
 | M2 | ✅ **App skeleton** | Menu-bar app, settings persisted in SQLite, engine child process start/stop/health |
 | M3 | ✅ **Core pipeline** | Interval scanner with snapshot diff, extractor (metadata + first N KB), rules, mover with collision handling, history log |

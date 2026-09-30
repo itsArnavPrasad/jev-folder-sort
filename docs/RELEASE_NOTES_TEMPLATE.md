@@ -1,6 +1,6 @@
 # jev-folder-sort {{VERSION}}
 
-A macOS menu-bar app that sorts your files into your own folder structure, using a small System One decision model ([open-jev](https://github.com/kyegomez/open-jev)) that runs **entirely on your Mac**.
+A macOS menu-bar app that sorts your files into your own folder structure, using a small System One decision model (pretrained MiniLM + a typed decision head, inspired by TypeSafe's Jev) that runs **entirely on your Mac**. Describe your folders in plain English and it follows the descriptions.
 
 ## Install
 

@@ -1,29 +1,23 @@
-"""open-jev with a pretrained MiniLM brain (model architecture "minilm", v0.2+).
+"""FolderModel: the decision core (decision.py) on a pretrained MiniLM encoder.
 
-Why: the plain open-jev encoders are trained from scratch, so everything the
-model knows about language comes from our small synthetic corpus. That caps it
-at ~60% on real files. all-MiniLM-L6-v2 is a sentence-similarity model
-pretrained on over a billion sentence pairs: it already knows that "W-2" and
-"tax documents" belong together, which is exactly what matching a file to a
-plain-English folder description needs.
+all-MiniLM-L6-v2 is a sentence-similarity model pretrained on over a billion
+sentence pairs, so it already knows that "W-2" and "tax documents" belong
+together. That is what matching a file to a plain-English folder description
+needs, and what a from-scratch encoder can't learn from synthetic data.
 
-What changes relative to open-jev (all done here, from the outside; the vendored
-open-jev code is untouched):
+1. ONE shared, pretrained MiniLM (6 post-norm BERT layers, 384-d, 12 heads)
+   encodes both the file and the folder options. This file implements the BERT
+   layers itself (no `transformers` dependency) and loads MiniLM's weights exactly
+   (verified identical to sentence-transformers).
+2. Structural embeddings (depth / sibling / path hash, which field a token came
+   from) are added to MiniLM's input embeddings, initialised at zero so the model
+   starts out as exactly MiniLM.
+3. Choice scores = the learned Choice head (zero-initialised) + a
+   **description-matching prior**: the learned-scale cosine similarity between
+   the file's mean-pooled embedding and each "Folder / Path: description" option.
+   Plain-English descriptions work from step 0; training learns corrections.
 
-1. `StateEncoder` and `TextEncoder` are replaced by ONE shared, pretrained
-   MiniLM (6 post-norm BERT layers, 384-d, 12 heads). open-jev's pre-norm blocks
-   can't take BERT weights, so this file implements the BERT layers itself
-   (no `transformers` dependency) and loads MiniLM's weights exactly.
-2. open-jev's structural embeddings (depth / sibling / path hash) are kept and
-   added to MiniLM's input embeddings, initialised at zero so the model starts
-   out as exactly MiniLM.
-3. Choice scores get a **description-matching prior**: the scaled cosine
-   similarity between the file's mean-pooled MiniLM embedding and each option
-   ("Finance / Taxes: tax returns, W-2"). Plain-English descriptions therefore
-   work from step 0; open-jev's learned Choice head adds corrections on top.
-
-Unchanged from open-jev: the query-slot read-out stack, typed heads (Noul,
-Choice, Score), the evidential confidence head, and RLCDLoss.
+History and reasoning: docs/MODEL_HISTORY.md.
 """
 
 from __future__ import annotations
@@ -32,8 +26,9 @@ from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
-from open_jev import Choice, Jev, JevConfig, Noul
 from torch import Tensor, nn
+
+from .decision import Choice, DecisionModel, ModelConfig, Noul
 
 CLS, SEP = 101, 102
 HIDDEN, LAYERS, HEADS, FFN, MAX_POS = 384, 6, 12, 1536, 512
@@ -123,9 +118,9 @@ def mean_pool(hidden: Tensor, pad_mask: Tensor) -> Tensor:
 
 
 class MiniLMStateEncoder(nn.Module):
-    """open-jev StateEncoder interface backed by MiniLM + open-jev's structural embeddings."""
+    """File encoder: MiniLM + structural embeddings. -> [B, T, 384], aligned with the pad mask."""
 
-    def __init__(self, cfg: JevConfig, bert: MiniLM) -> None:
+    def __init__(self, cfg: ModelConfig, bert: MiniLM) -> None:
         super().__init__()
         self.cfg = cfg
         self.bert = bert
@@ -136,9 +131,6 @@ class MiniLMStateEncoder(nn.Module):
             nn.init.zeros_(e.weight)  # start out as exactly MiniLM
         self.pooled: Tensor | None = None  # last mean-pooled embedding, for the prior
 
-    @property
-    def token(self) -> nn.Embedding:  # parity with open-jev's StateEncoder
-        return self.bert.word
 
     def forward(self, ids: Tensor, paths: Tensor, pad_mask: Tensor) -> Tensor:
         cfg = self.cfg
@@ -149,7 +141,7 @@ class MiniLMStateEncoder(nn.Module):
             + self.path_emb(paths[..., 2].remainder(cfg.path_hash_buckets))
         )
         # Prepend [CLS] as in MiniLM's pretraining; drop it again so the output
-        # lines up with open-jev's pad mask.
+        # lines up with the caller's pad mask.
         cls = torch.full((B, 1), CLS, dtype=ids.dtype, device=ids.device)
         full_ids = torch.cat([cls, ids], 1)
         full_pad = torch.cat([torch.zeros_like(pad_mask[:, :1]), pad_mask], 1)
@@ -160,15 +152,12 @@ class MiniLMStateEncoder(nn.Module):
 
 
 class MiniLMTextEncoder(nn.Module):
-    """open-jev TextEncoder interface: short strings -> mean-pooled MiniLM sentence embedding."""
+    """Short strings (questions, folder options) -> mean-pooled MiniLM sentence embedding [N, 384]."""
 
     def __init__(self, bert: MiniLM) -> None:
         super().__init__()
         self.bert = bert
 
-    @property
-    def token(self) -> nn.Embedding:
-        return self.bert.word
 
     def forward(self, ids: Tensor, pad_mask: Tensor) -> Tensor:
         B = ids.shape[0]
@@ -181,15 +170,15 @@ class MiniLMTextEncoder(nn.Module):
         return mean_pool(self.bert(full, full_pad), full_pad)
 
 
-class JevMiniLM(Jev):
-    """open-jev's read-out and heads on a shared pretrained MiniLM, plus the description prior."""
+class FolderModel(DecisionModel):
+    """Read-out slots and typed heads on a shared pretrained MiniLM, plus the description prior."""
 
     arch = "minilm"
 
-    def __init__(self, cfg: JevConfig, tokenizer=None) -> None:
+    def __init__(self, cfg: ModelConfig, tokenizer) -> None:
         super().__init__(cfg, tokenizer)
         if cfg.d_model != HIDDEN:
-            raise ValueError("JevMiniLM needs d_model=384")
+            raise ValueError("FolderModel needs d_model=384")
         self.bert = MiniLM(cfg.vocab_size, cfg.dropout)
         self.state_encoder = MiniLMStateEncoder(cfg, self.bert)
         self.text_encoder = MiniLMTextEncoder(self.bert)
@@ -204,7 +193,7 @@ class JevMiniLM(Jev):
         return list(self.bert.parameters())
 
     def logits(self, states: Sequence, questions: Sequence) -> list[tuple[Tensor, Tensor]]:
-        """Same contract as Jev.logits; Choice logits get the description prior."""
+        """(probs [B, K], confidence [B]) per question. Choice logits include the description prior."""
         cache = self.encode_state(states)
         state_emb = F.normalize(self.state_encoder.pooled, dim=-1)  # [B, d]
         pooled = self._readout(cache, questions)
@@ -227,8 +216,5 @@ class JevMiniLM(Jev):
             out.append((probs.clamp(min=1e-8), conf))
         return out
 
-    def forward(self, *args, **kwargs):  # the Jev.forward path would skip the prior
-        raise NotImplementedError("use logits(); FileSorter wraps it")
 
-
-__all__ = ["JevMiniLM", "MiniLM", "mean_pool"]
+__all__ = ["FolderModel", "MiniLM", "mean_pool"]

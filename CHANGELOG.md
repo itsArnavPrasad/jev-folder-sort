@@ -9,7 +9,7 @@
   - `ScopeGuard` is the only code that moves files, and never overwrites.
 - **Sorting:** runs every 5, 10 or 15 minutes on new or changed files.
   - Rules run first (extension, name, source domain, file type).
-  - Then the local open-jev model, including a "none of these fit" answer.
+  - Then the local model, including a "none of these fit" answer.
   - Anything below the confidence threshold goes to Review.
 - **Review:** accept a suggestion, move a file to any allowed folder, or leave it where it is.
 - **Undo:** a single move or a whole run.
@@ -19,5 +19,6 @@
   - the new model only activates if it isn't worse on held-out examples;
   - retrains automatically on mains power.
 - Stats and onboarding.
-- **Base model** `base-0.2.0` (see docs/MODEL.md). It runs in a sandbox with no network access, and never sees paths.
+- **Model** `minilm-0.3.0`: a System One decision head on a pretrained MiniLM encoder, with a description-matching prior. No longer depends on open-jev. **Describe folders in plain English and it follows the descriptions** (see docs/MODEL_HISTORY.md, docs/MODEL.md). It runs in a sandbox with no network access and never sees paths.
+- **Learn from my folders**: in the app, or `scripts/learn_my_folders.sh`. Reads your already-sorted files (read-only), fine-tunes, and reports per-folder accuracy and a suggested threshold.
 - **Self-contained DMG** with a bundled Python and PyTorch, so nothing needs to be installed.

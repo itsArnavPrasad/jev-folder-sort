@@ -26,7 +26,7 @@ Product and technical decisions for v1, with the reasoning behind each.
 
 | # | Decision | Why |
 |---|---|---|
-| T1 | Engine is **open-jev** (PyTorch), not TypeSafe's hosted Jev | No API access; local-only requirement |
+| T1 | ~~Engine is **open-jev**~~ (superseded by T32/T38): a local Jev-style model, not TypeSafe's hosted Jev | No API access; local-only requirement |
 | T2 | We train open-jev ourselves: pretrained tokenizer/embeddings → synthetic base training → on-device personalisation | open-jev ships with random weights and a placeholder hash tokenizer |
 | T3 | Native **SwiftUI** menu-bar app + **Python engine child process** over stdin/stdout JSON | Native Mac UX, while using open-jev in PyTorch unchanged; no network port |
 | T4 | Low-confidence files **stay in place** and go to the Review list | Consistent with P4 (no app-created "Review" folder); never move when unsure |
@@ -34,7 +34,7 @@ Product and technical decisions for v1, with the reasoning behind each.
 | T6 | Non-sandboxed, Developer ID signed + notarized | Needed for folder access + child process; required for a smooth DMG install |
 | T7 | Bundle relocatable Python + PyTorch in the app | Users shouldn't need Python; size cost accepted for v1, Core ML later |
 | T8 | App state in SQLite (GRDB) in Application Support | One small, durable, local store for history, undo and training examples |
-| T9 | Vendor open-jev **unmodified** under `engine/third_party/` with NOTICE | `Jev(cfg, tokenizer=...)` already accepts a custom tokenizer, so everything else (tokenizer, embeddings, checkpoints) wraps it from outside |
+| T9 | ~~Vendor open-jev unmodified~~ (superseded by T38): vendor open-jev **unmodified** under `engine/third_party/` with NOTICE | `Jev(cfg, tokenizer=...)` already accepts a custom tokenizer, so everything else (tokenizer, embeddings, checkpoints) wraps it from outside |
 | T10 | **Scope is hard-enforced by `ScopeGuard`**, the only code that moves files; a test fails the build if anything else renames/moves/deletes | The user must be able to trust that nothing outside the scope is ever touched, whatever the model says |
 | T11 | Scope = watched folders + **one destination root** (user-chosen, no default) + checklist of existing sub-folders | Simple to explain on one screen; a single root makes "never outside it" easy to verify |
 | T12 | Protected locations are hard-coded (system dirs, `~/Library` incl. iCloud/CloudStorage, `~/.Trash`, the app); scope folders must be inside home or on an external volume, never the whole home/volume | Stops a mis-click from pointing the app at something dangerous |
@@ -56,6 +56,15 @@ Product and technical decisions for v1, with the reasoning behind each.
 | T28 | **Ad-hoc signing** now, `notarize.sh` for later | No Developer ID yet; README explains the one-time right-click → Open |
 | T29 | GitHub: everything prepared and committed locally; **the maintainer pushes and publishes** | Publishing is the owner's action |
 | T30 | No co-author trailers in commit messages | Maintainer preference |
+| T31 | **Plain-English folder descriptions are the primary way to steer the sorter** | Maintainer's product goal: "explain what the folder should look like, and it sorts like that" |
+| T32 | **Replace open-jev's encoders with one shared pretrained MiniLM** (`arch="minilm"`), keeping open-jev's read-out, heads and RLCD; vendored code stays untouched (subclass) | From-scratch encoders capped at ~60% and ignored descriptions (51–53% on the plain-English set); untrained MiniLM matching alone scores 79% there. See MODEL_HISTORY.md |
+| T33 | Own ~100-line BERT implementation instead of the `transformers` library | No big new dependency in the bundle; verified identical to sentence-transformers |
+| T34 | Choice logits = open-jev learned score (zero-init) + **learned-scale cosine prior** between file and `path: description` | Descriptions work from step 0 and can't be "trained away"; training learns corrections |
+| T35 | Skip external datasets and teacher distillation for now | Maintainer choice: focus on description-following; revisit if needed (research notes in MODEL.md) |
+| T36 | "Learn from my folders" = read-only bootstrap of up to 100 files/folder, per-folder hold-out, suggested threshold at ≥95% held-out precision (needs ≥10 held-out files) | Fast, safe onboarding for someone whose folders are already organised |
+| T37 | A generative SLM is a future **System Two fallback** for low-confidence files, not a replacement | 10–100× slower/larger, weaker calibration, output must be constrained; the System One path stays default |
+| T38 | **Remove open-jev entirely**: fold the ~300 lines we still used (typed questions, state flattening, read-out, heads, RLCD) into our own `decision.py` with attribution; delete the vendored package; drop the from-scratch v0.1/v0.2 architecture | Maintainer request; our model only used those pieces. Same parameter names, so minilm-0.3.0 loads and scores identically |
+| T39 | **Evaluated Laya; not adopted** as the engine or bundled | Zero-shot on our held-out sets it scored 31–51% vs our 77–85%, at 150–580 ms/file vs 4–7 ms, 843 MB vs ~60 MB, and can't be personalised on-device (GPU fine-tuning). As a second opinion it rescued ~9% of unsure files. See MODEL_HISTORY.md |
 
 ## Open questions
 

@@ -24,7 +24,7 @@ FILES = [
 @pytest.fixture(scope="module")
 def sorter():
     torch.manual_seed(0)
-    return FileSorter(build_model(pretrained_embeddings=False).to("cpu"), {"version": "test"})
+    return FileSorter(build_model(pretrained=False).to("cpu"), {"version": "test"})
 
 
 def test_tokenizer_subwords_and_pad():
@@ -100,3 +100,24 @@ def test_protocol_round_trip():
     assert resps[0]["protocol"] == PROTOCOL_VERSION
     assert len(resps[1]["results"]) == 2
     assert resps[2]["ok"] is False and resps[3]["ok"] is False
+
+
+def test_engine_is_self_contained():
+    """open-jev was folded into decision.py; nothing may import it again."""
+    import pathlib
+
+    pkg = pathlib.Path(__file__).parents[1] / "jevsort_engine"
+    offenders = [p.name for p in pkg.glob("*.py") if "import open_jev" in p.read_text() or "from open_jev" in p.read_text()]
+    assert offenders == []
+    assert not (pkg.parent / "third_party").exists()
+
+
+def test_old_architecture_checkpoints_are_refused(sorter, tmp_path):
+    import json
+
+    save_checkpoint(sorter.model, tmp_path, {"version": "x"})
+    cfg = json.loads((tmp_path / "config.json").read_text())
+    cfg["arch"] = "jev"
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match="only 'minilm'"):
+        load_checkpoint(tmp_path, torch.device("cpu"))

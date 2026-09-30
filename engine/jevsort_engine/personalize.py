@@ -20,8 +20,8 @@ import time
 from pathlib import Path
 
 import torch
-from open_jev import RLCDLoss
 
+from .decision import RLCDLoss
 from .model import FileSorter, build_choice, load_checkpoint, save_checkpoint
 from .state import NONE_ID, Folder, model_state, parse_tree
 

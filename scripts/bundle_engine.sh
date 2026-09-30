@@ -2,7 +2,7 @@
 # Assemble a self-contained engine for the release app: build/engine/
 #   python/         relocatable CPython 3.12 (python-build-standalone, via uv)
 #   site-packages/  torch, tokenizers, safetensors, numpy, ... (trimmed)
-#   app/            jevsort_engine, datasets, open_jev (vendored)
+#   app/            jevsort_engine, datasets
 #   checkpoints/base/
 # Usage: scripts/bundle_engine.sh [checkpoint_dir]   (default engine/checkpoints/base)
 set -euo pipefail
@@ -32,7 +32,6 @@ uv pip install -q --python "$PY" --target "$OUT/site-packages" -r "$REPO/build/r
 echo "==> Engine code + model"
 rsync -a --exclude __pycache__ "$REPO/engine/jevsort_engine" "$OUT/app/"
 rsync -a --exclude __pycache__ --exclude generated "$REPO/engine/datasets" "$OUT/app/"
-rsync -a --exclude __pycache__ "$REPO/engine/third_party/open_jev" "$OUT/app/"
 rsync -a "$CKPT/" "$OUT/checkpoints/base/"
 
 echo "==> Trim"

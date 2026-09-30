@@ -93,7 +93,7 @@ def main() -> None:
     if args.zero_shot:
         from .model import FileSorter, build_model
 
-        sorters["minilm-zero-shot"] = FileSorter(build_model(arch="minilm").eval())
+        sorters["minilm-zero-shot"] = FileSorter(build_model().eval())
     reports = {}
     for set_name, source in p_sets.items():
         cases = eval_cases(source)

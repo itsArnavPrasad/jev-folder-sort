@@ -1,6 +1,6 @@
 """Turn the app's raw file description into the fixed-schema state the model sees.
 
-Stable keys matter: open-jev's structural path embeddings learn what each field
+Stable keys matter: the structural path embeddings learn what each field
 means (`name` vs `text`), so every producer — the app, the dataset generator and
 the eval set — goes through `model_state`.
 """

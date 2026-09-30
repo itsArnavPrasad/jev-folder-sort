@@ -1,9 +1,10 @@
 jev-folder-sort
 Copyright 2026 Arnav Prasad
 
-This product includes software from open-jev
+engine/jevsort_engine/decision.py contains portions adapted from open-jev
 (https://github.com/kyegomez/open-jev, commit 93843ef288f3d35fd91263377c40b6f917d77da0),
-licensed under the Apache License 2.0. It is vendored, unmodified, in engine/third_party/open_jev/.
+Copyright the open-jev authors, licensed under the Apache License 2.0: the typed
+question dataclasses, state flattening, read-out block, decision heads and RLCD loss.
 
 The engine uses the tokenizer vocabulary and word embeddings of
 sentence-transformers/all-MiniLM-L6-v2 (Apache License 2.0).

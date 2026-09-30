@@ -18,7 +18,7 @@ def examples(n):
 
 def base_ckpt(tmp_path):
     torch.manual_seed(0)
-    save_checkpoint(build_model(pretrained_embeddings=False), tmp_path / "base", {"version": "base-test"})
+    save_checkpoint(build_model(pretrained=False), tmp_path / "base", {"version": "base-test"})
     return tmp_path / "base"
 
 

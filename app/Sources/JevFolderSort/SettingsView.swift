@@ -177,7 +177,7 @@ struct EngineSettingsView: View {
             } header: {
                 Text("Local model")
             } footer: {
-                Text("The open-jev model runs on this Mac in a sandbox with no network access and no write access to your files. It only sees file names, metadata and the first few KB of text, and answers with a folder id from your allowed list.")
+                Text("The model runs on this Mac in a sandbox with no network access and no write access to your files. It only sees file names, metadata and the first few KB of text, and answers with a folder id from your allowed list.")
             }
 
             Section {

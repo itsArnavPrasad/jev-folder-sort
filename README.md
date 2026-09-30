@@ -4,7 +4,7 @@
 
 A native macOS menu-bar app that keeps your Desktop and Downloads (or any folder) tidy. It sorts new files into a folder structure you define, using a small **System One decision model** that runs **entirely on your Mac**.
 
-It's built on [open-jev](https://github.com/kyegomez/open-jev), an open-source PyTorch reconstruction of TypeSafe AI's [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). There's no cloud and no API key, and your files never leave your machine.
+It's inspired by TypeSafe AI's [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev): one forward pass, typed answers, calibrated probabilities, no text generation. The model is our own: a pretrained MiniLM sentence encoder with a System One decision head, so you can **describe each folder in plain English** and it follows the descriptions ([how we got here](docs/MODEL_HISTORY.md)). There's no cloud and no API key, and your files never leave your machine.
 
 ## How it works
 
@@ -71,4 +71,4 @@ The default confidence threshold is conservative, so unsure files wait in Review
 
 ## License
 
-Apache-2.0. open-jev is vendored under the same license (see [NOTICE](NOTICE)). Not affiliated with TypeSafe AI.
+Apache-2.0. Parts of the decision head are adapted from [open-jev](https://github.com/kyegomez/open-jev) (Apache-2.0, see [NOTICE](NOTICE)). Not affiliated with TypeSafe AI.

@@ -1,4 +1,4 @@
-"""open-jev configured and wrapped for one job: pick a folder for a file."""
+"""The folder model: build, save, load, and the inference wrapper (FileSorter)."""
 
 from __future__ import annotations
 
@@ -10,38 +10,23 @@ from dataclasses import asdict
 from pathlib import Path
 
 import torch
-from open_jev import Choice, Jev, JevConfig
 from safetensors.torch import load_file, save_file
 
+from .decision import Choice, ModelConfig
+from .minilm import FolderModel
 from .state import NONE_ID, NONE_OPTION, QUESTION, Folder, model_state
 from .tokenizer import VOCAB_SIZE, PretrainedTokenizer
 
 MINILM = "sentence-transformers/all-MiniLM-L6-v2"
-MAX_CHOICE = 255  # open-jev's Choice cardinality cap
+MAX_CHOICE = 255  # Choice cardinality cap (two-stage choice above it)
 BATCH = 16
+ARCH = "minilm"
 
 
-def default_config(arch: str = "minilm") -> JevConfig:
-    if arch == "minilm":
-        # d_model/vocab fixed by MiniLM; n_heads/d_ff/layers below are open-jev's read-out stack.
-        return JevConfig(
-            vocab_size=VOCAB_SIZE, d_model=384, n_heads=6, d_ff=1024, dropout=0.1,
-            n_state_layers=0, max_state_len=510, n_question_layers=0, max_question_len=48,
-            n_slots=8, n_readout_layers=4,
-        )
-    return JevConfig(
-        vocab_size=VOCAB_SIZE,
-        d_model=384,
-        n_heads=6,
-        d_ff=1024,
-        dropout=0.1,
-        n_state_layers=4,
-        max_state_len=512,
-        n_question_layers=2,
-        max_question_len=48,
-        n_slots=8,
-        n_readout_layers=4,
-    )
+def default_config() -> ModelConfig:
+    # d_model/vocab are fixed by MiniLM; heads/d_ff/layers describe the read-out stack.
+    return ModelConfig(vocab_size=VOCAB_SIZE, d_model=384, n_heads=6, d_ff=1024, dropout=0.1,
+                       max_state_len=510, max_question_len=48, n_slots=8, n_readout_layers=4)
 
 
 def pick_device() -> torch.device:
@@ -58,85 +43,42 @@ def _minilm_weights() -> dict[str, torch.Tensor]:
     return load_file(hf_hub_download(MINILM, "model.safetensors"))
 
 
-def _minilm_word_embeddings() -> torch.Tensor:
-    return _minilm_weights()["embeddings.word_embeddings.weight"]
-
-
-def build_model(cfg: JevConfig | None = None, pretrained_embeddings: bool = True, arch: str = "minilm") -> Jev:
-    """A fresh model.
-
-    arch="minilm" (v0.2+): open-jev read-out on a shared pretrained MiniLM
-    encoder with a description-matching prior (see minilm.py).
-    arch="jev" (v0.1): plain open-jev encoders with frozen MiniLM word vectors.
-    """
-    if arch == "minilm":
-        from .minilm import JevMiniLM
-
-        model = JevMiniLM(cfg or default_config("minilm"), tokenizer=PretrainedTokenizer())
-        if pretrained_embeddings:
-            model.bert.load_pretrained(_minilm_weights())
-        # Word vectors stay frozen: they are what keeps unseen words (brands,
-        # other languages) meaningful. The transformer layers fine-tune.
-        model.bert.word.weight.requires_grad_(False)
-        return model
-
-    cfg = cfg or default_config("jev")
-    model = Jev(cfg, tokenizer=PretrainedTokenizer())
-    # open-jev initialises every embedding at N(0, 1), which would drown the
-    # pretrained word vectors (std ~0.056). Structural/position signals start
-    # small so content dominates early training.
-    enc = model.state_encoder
-    for emb in (enc.depth_emb, enc.sibling_emb, enc.path_emb, enc.pos_emb, model.text_encoder.pos):
-        torch.nn.init.normal_(emb.weight, std=0.02)
-    # One word-embedding table, shared by state and question/option encoders and
-    # frozen at MiniLM's pretrained values: 23M fewer trainable parameters, and
-    # words the synthetic corpus never uses (brands, German) keep their meaning.
-    model.text_encoder.token = enc.token
-    if pretrained_embeddings:
-        with torch.no_grad():
-            enc.token.weight.copy_(_minilm_word_embeddings())
-    else:
-        torch.nn.init.normal_(enc.token.weight, std=0.056)
-    enc.token.weight.requires_grad_(False)
+def build_model(cfg: ModelConfig | None = None, pretrained: bool = True) -> FolderModel:
+    """A fresh FolderModel. `pretrained=True` loads MiniLM (downloaded once, at training time only)."""
+    model = FolderModel(cfg or default_config(), tokenizer=PretrainedTokenizer())
+    if pretrained:
+        model.bert.load_pretrained(_minilm_weights())
+    # Word vectors stay frozen: they are what keeps unseen words (brands,
+    # other languages) meaningful. The transformer layers fine-tune.
+    model.bert.word.weight.requires_grad_(False)
     return model
 
 
-def model_arch(model: Jev) -> str:
-    return getattr(model, "arch", "jev")
-
-
-def save_checkpoint(model: Jev, directory: Path, meta: dict) -> None:
+def save_checkpoint(model: FolderModel, directory: Path, meta: dict) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    # Tied tensors are stored once (the plain-jev text encoder shares the state
-    # encoder's table; in "minilm" both encoders share model.bert).
-    skip_prefixes = ("text_encoder.", "state_encoder.bert.") if model_arch(model) == "minilm" else ()
+    # Both encoders share model.bert; store those tensors once.
     weights = {
         k: v.detach().to("cpu", torch.float16)
         for k, v in model.state_dict().items()
-        if k != "text_encoder.token.weight" and not k.startswith(skip_prefixes)
+        if not k.startswith(("text_encoder.", "state_encoder.bert."))
     }
     save_file(weights, str(directory / "model.safetensors"))
-    (directory / "config.json").write_text(json.dumps({**asdict(model.cfg), "arch": model_arch(model)}, indent=2))
+    (directory / "config.json").write_text(json.dumps({**asdict(model.cfg), "arch": ARCH}, indent=2))
     (directory / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
-def load_checkpoint(directory: Path, device: torch.device | None = None) -> tuple[Jev, dict]:
+def load_checkpoint(directory: Path, device: torch.device | None = None) -> tuple[FolderModel, dict]:
     raw = json.loads((directory / "config.json").read_text())
     arch = raw.pop("arch", "jev")
-    cfg = JevConfig(**raw)
+    if arch != ARCH:
+        raise ValueError(f"{directory} is a '{arch}' checkpoint; only '{ARCH}' (v0.3+) is supported")
+    model = build_model(ModelConfig.from_dict(raw), pretrained=False)
     weights = {k: v.float() for k, v in load_file(str(directory / "model.safetensors")).items()}
-    if arch == "minilm":
-        model = build_model(cfg, pretrained_embeddings=False, arch="minilm")
-        model.load_state_dict(weights, strict=False)
-        missing = [k for k in model.state_dict() if k not in weights
-                   and not k.startswith(("text_encoder.", "state_encoder.bert."))]
-        if missing:
-            raise ValueError(f"checkpoint is missing {missing[:3]}")
-    else:
-        model = Jev(cfg, tokenizer=PretrainedTokenizer())
-        model.text_encoder.token = model.state_encoder.token
-        weights["text_encoder.token.weight"] = weights["state_encoder.token.weight"]
-        model.load_state_dict(weights)
+    model.load_state_dict(weights, strict=False)
+    missing = [k for k in model.state_dict() if k not in weights
+               and not k.startswith(("text_encoder.", "state_encoder.bert."))]
+    if missing:
+        raise ValueError(f"checkpoint is missing {missing[:3]}")
     meta = json.loads((directory / "meta.json").read_text())
     return model.to(device or pick_device()).eval(), meta
 
@@ -165,7 +107,7 @@ def build_choice(folders: list[Folder]) -> tuple[Choice, list[str]]:
 class FileSorter:
     """Inference wrapper used by the server."""
 
-    def __init__(self, model: Jev, meta: dict | None = None) -> None:
+    def __init__(self, model: FolderModel, meta: dict | None = None) -> None:
         self.model = model.eval()
         self.meta = meta or {}
         self.device = next(model.parameters()).device
