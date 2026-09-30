@@ -32,6 +32,16 @@ assert d["run"]["error"] is None, d["run"]
 print("e2e ok:", d["engine"], d["run"])
 PY
 
+echo "==> Scenario benchmark on the release app (bundled engine only)"
+env -u JEVSORT_ENGINE python3 scripts/e2e_scenarios.py --app build/JevFolderSort.app/Contents/MacOS/JevFolderSort \
+  | tee build/e2e-scenarios.txt
+python3 - <<PY
+import re; t = open("build/e2e-scenarios.txt").read()
+row = [l for l in t.splitlines() if l.startswith("TOTAL")][0].split()
+assert row[3] == "0", "release app made wrong moves in the scenario benchmark: " + " ".join(row)
+print("scenario benchmark ok:", t.strip().splitlines()[-1])
+PY
+
 echo "==> Artifacts"
 rm -rf "$OUT" && mkdir -p "$OUT"
 cp build/jev-folder-sort-$VERSION-arm64.dmg build/jev-folder-sort-$VERSION-arm64.dmg.sha256 "$OUT/"
